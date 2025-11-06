@@ -51,6 +51,7 @@ Conecte o WebSocket e ative os sensores
 
 Aponte e controle!
 
+`
 📁 Estrutura do Projeto
 aimpointer/
 ├── .git/
@@ -86,6 +87,7 @@ aimpointer/
     ├── __init__.py
     ├── helpers.py
     └── network.py
+`
 
 🛠️ Desenvolvimento
 Requisitos de Desenvolvimento
@@ -128,5 +130,6 @@ Desenvolvido com ❤️ para a comunidade de código aberto
 
 
 ⚠️ Nota: Este projeto atualmente funciona apenas no Windows devido às dependências do sistema de controle do mouse.
+
 
 
