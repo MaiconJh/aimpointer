@@ -129,3 +129,4 @@ Desenvolvido com ❤️ para a comunidade de código aberto
 
 ⚠️ Nota: Este projeto atualmente funciona apenas no Windows devido às dependências do sistema de controle do mouse.
 
+
