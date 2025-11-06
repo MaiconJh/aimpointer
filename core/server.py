@@ -15,14 +15,8 @@ from utils.network import get_local_ip
 HTTP_PORT = 8443
 WS_PORT = 8765
 
-# Configurações globais compartilhadas - MESMA estrutura
-global_settings = {
-    "sensitivity": 60,
-    "smoothing": 75,
-    "compensation": 2,
-    "sensor_fusion": True,
-    "control_mode": "absolute"
-}
+# REMOVIDO: Configurações globais compartilhadas
+# Cada cliente agora tem suas próprias configurações locais
 
 # Conjunto de clientes conectados - MESMA lógica
 connected_clients = set()
@@ -68,7 +62,7 @@ def run_http_server():
         print("Servidor HTTP parado")
 
 async def handle_websocket(websocket):
-    """WebSocket para controle de ponteiro - MESMA lógica do original"""
+    """WebSocket para controle de ponteiro - SIMPLIFICADO"""
     print("Cliente WebSocket conectado!")
     connected_clients.add(websocket)
     
@@ -76,12 +70,8 @@ async def handle_websocket(websocket):
     calibration = {'x': 0, 'y': 0, 'z': 0}
     control_mode = "absolute"
     
-    # Envia configurações globais ao conectar - MESMA lógica
-    await websocket.send(json.dumps({
-        "type": "global_settings",
-        "settings": global_settings
-    }))
-    
+    # REMOVIDO: Envio de configurações globais
+    # Envia apenas informações essenciais
     await websocket.send(json.dumps({
         "message": "Conectado!",
         "status": "connected",
@@ -129,21 +119,8 @@ async def handle_websocket(websocket):
                     "calibration": calibration
                 }))
                 
-            elif data.get('type') == 'update_global_settings':
-                # Atualiza configurações globais - MESMA lógica
-                new_settings = data.get('settings', {})
-                global_settings.update(new_settings)
-                
-                # Envia para TODOS os clientes conectados - MESMA lógica
-                for client in connected_clients:
-                    if client.open:
-                        try:
-                            await client.send(json.dumps({
-                                "type": "global_settings",
-                                "settings": global_settings
-                            }))
-                        except:
-                            continue
+            # REMOVIDO: Atualização de configurações globais
+            # Cada cliente agora gerencia suas próprias configurações
                 
     except Exception as e:
         print(f"Erro WebSocket: {e}")
