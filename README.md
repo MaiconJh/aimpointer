@@ -26,13 +26,16 @@ Transforme seu smartphone em um controle de movimento preciso para o mouse do co
 - Ambos na mesma rede Wi-Fi
 
 ### Instalação
-```bash
 # Clone o repositório
+```bash
 git clone https://github.com/MaiconJh/aimpointer.git
 cd aimpointer
+```
 
 # Instale as dependências
+```bash
 pip install -r requirements.txt
+```
 
 # Execute o servidor
 python main.py
@@ -125,3 +128,4 @@ Desenvolvido com ❤️ para a comunidade de código aberto
 
 
 ⚠️ Nota: Este projeto atualmente funciona apenas no Windows devido às dependências do sistema de controle do mouse.
+
