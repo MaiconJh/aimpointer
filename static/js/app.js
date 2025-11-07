@@ -1,21 +1,40 @@
 ﻿// static/js/app.js
-// SISTEMA PRINCIPAL DO AIMPOINTER - VERSÃO COMPLETA COM VISUALIZADOR 3D CORRIGIDO
+// SISTEMA PRINCIPAL DO AIMPOINTER - VERSÃO COM CALIBRAÇÃO REESCRITA E MAIS ROBUSTA
+
+// ===== UTILITÁRIAS PARA ÂNGULOS =====
+function normalizeAngle(angle) {
+    // Normaliza qualquer ângulo para [0, 360)
+    let a = angle % 360;
+    if (a < 0) a += 360;
+    return a;
+}
+
+function angleDiff(a, b) {
+    // Retorna a menor diferença assinada entre a e b em graus no intervalo (-180, 180]
+    // funciona para ângulos em 0..360 ou -180..180
+    const na = normalizeAngle(a);
+    const nb = normalizeAngle(b);
+    let diff = na - nb;
+    if (diff > 180) diff -= 360;
+    if (diff <= -180) diff += 360;
+    return diff;
+}
 
 // ===== INICIALIZAÇÃO DO VISUALIZADOR 3D =====
 function initialize3DVisualizer() {
     console.log('🎯 Inicializando visualizador 3D...');
-    
+
     const visualizerContainer = document.getElementById('deviceVisualizer');
     const threejsContainer = document.getElementById('threejs-container');
-    
+
     if (!visualizerContainer || !threejsContainer) {
         console.error('❌ Containers do visualizador 3D não encontrados!');
         return;
     }
-    
+
     // Adicionar classe de loading
     visualizerContainer.classList.add('loading');
-    
+
     // Verificar se Three.js está disponível
     if (typeof THREE === 'undefined') {
         console.error('❌ Three.js não foi carregado!');
@@ -23,15 +42,13 @@ function initialize3DVisualizer() {
         visualizerContainer.classList.add('error');
         return;
     }
-    
+
     // Pequeno delay para garantir que o DOM esteja pronto
     setTimeout(() => {
         try {
-            // Inicializar o visualizador Three.js
             if (typeof safeInitializeThreeJS === 'function') {
                 safeInitializeThreeJS();
             } else if (window.threeJSVisualizer) {
-                // Já está inicializado
                 visualizerContainer.classList.remove('loading');
                 console.log('✅ Visualizador 3D já inicializado');
             } else {
@@ -50,14 +67,13 @@ function initialize3DVisualizer() {
 // ===== DIAGNÓSTICO DO VISUALIZADOR 3D =====
 function diagnose3DProblem() {
     console.log('=== 🔍 DIAGNÓSTICO DO VISUALIZADOR 3D ===');
-    
-    // Verificar elementos DOM
+
     const elements = {
         'deviceVisualizer': document.getElementById('deviceVisualizer'),
         'threejs-container': document.getElementById('threejs-container'),
         'orientationIndicator': document.getElementById('orientationIndicator')
     };
-    
+
     for (const [name, element] of Object.entries(elements)) {
         if (element) {
             console.log(`✅ ${name}: encontrado`, element);
@@ -69,244 +85,127 @@ function diagnose3DProblem() {
             console.error(`❌ ${name}: NÃO encontrado`);
         }
     }
-    
-    // Verificar Three.js e dependências
+
     console.log('Three.js disponível:', typeof THREE !== 'undefined');
     console.log('Visualizador global:', window.threeJSVisualizer);
     console.log('Função initializeThreeJS:', typeof initializeThreeJS);
     console.log('Função safeInitializeThreeJS:', typeof safeInitializeThreeJS);
 }
 
-// ===== SISTEMA DE CALIBRAÇÃO BASEADO NA POSIÇÃO INICIAL =====
+// ===== SISTEMA DE CALIBRAÇÃO (REESCRITO) =====
 class PositionBasedCalibrationSystem {
     constructor() {
-        this.initialPosition = null;
-        this.calibrationSteps = [
-            {
-                id: 1,
-                title: "Posição Inicial",
-                description: "Defina a posição inicial de referência",
-                isInitialStep: true,
-                completed: false
-            },
-            {
-                id: 2,
-                title: "Giro 90° Esquerda", 
-                description: "Gire 90° para a esquerda em relação à posição inicial",
-                targetOffset: { gamma: -90, beta: 0, alpha: 0 },
-                tolerance: 25,
-                completed: false
-            },
-            {
-                id: 3,
-                title: "Giro 90° Direita",
-                description: "Gire 90° para a direita em relação à posição inicial", 
-                targetOffset: { gamma: 90, beta: 0, alpha: 0 },
-                tolerance: 25,
-                completed: false
-            },
-            {
-                id: 4,
-                title: "Posição Final",
-                description: "Volte para a posição inicial de referência",
-                targetOffset: { gamma: 0, beta: 0, alpha: 0 },
-                tolerance: 15,
-                completed: false
-            }
-        ];
-        
-        this.currentStep = 0;
+        this.initialSamples = [];
         this.isCalibrating = false;
-        this.calibrationSamples = [];
-        this.finalCalibration = { x: 0, y: 0, z: 0 };
+        this.currentStep = 0;
+        this.calibrationSteps = [
+            { id: 1, title: "Posição Inicial", isInitialStep: true, completed: false, description: "Defina a posição inicial de referência" },
+            { id: 2, title: "Giro 90° Esquerda", targetOffset: { gamma: -90, beta: 0, alpha: 0 }, tolerance: 25, completed: false },
+            { id: 3, title: "Giro 90° Direita", targetOffset: { gamma: 90, beta: 0, alpha: 0 }, tolerance: 25, completed: false },
+            { id: 4, title: "Voltar para Inicial", targetOffset: { gamma: 0, beta: 0, alpha: 0 }, tolerance: 15, completed: false }
+        ];
+        // baseline guarda a orientação de referência (gamma,beta,alpha)
+        this.baseline = null;
+        this.samplesWindowMs = 1000; // janela para média de amostras na definição
     }
 
     startCalibration() {
         this.isCalibrating = true;
         this.currentStep = 0;
-        this.initialPosition = null;
-        this.calibrationSamples = [];
+        this.initialSamples = [];
+        this.calibrationSteps.forEach(s => s.completed = false);
         this.updateUI();
-        
-        // Ativar modo de calibração no visualizador
-        if (window.threeJSVisualizer) {
-            window.threeJSVisualizer.setCalibrationMode(true, 0);
-        }
-    }
-
-    confirmCurrentStep() {
-        if (!this.isCalibrating || this.currentStep >= this.calibrationSteps.length) return;
-        
-        const currentStepData = this.calibrationSteps[this.currentStep];
-        
-        // Para o passo inicial, define a posição de referência
-        if (currentStepData.isInitialStep && !this.initialPosition) {
-            const recentSamples = this.getRecentSamples();
-            if (recentSamples.length > 0) {
-                this.initialPosition = this.calculateAverage(recentSamples);
-                currentStepData.completed = true;
-                this.currentStep++;
-                
-                // Define calibração instantaneamente
-                this.finalCalibration = {
-                    x: this.initialPosition.gamma,
-                    y: this.initialPosition.beta,
-                    z: this.initialPosition.alpha
-                };
-                
-                // Aplica calibração imediatamente no sistema principal
-                pointerSystem.calibration = this.finalCalibration;
-                
-                // Reseta o filtro para o centro
-                pointerSystem.resetFilter();
-                
-                // Envia calibração para servidor
-                if (window.socket && window.socket.readyState === WebSocket.OPEN) {
-                    window.socket.send(JSON.stringify({
-                        type: 'calibrate',
-                        orientation: this.finalCalibration
-                    }));
-                }
-                
-                this.updateUI();
-                
-                // Feedback visual
-                showNotification('✅ Posição inicial definida! O sistema foi recalibrado.');
-            }
-            return;
-        }
-        
-        // Para passos subsequentes, coleta amostras
-        currentStepData.completed = true;
-        const stepSamples = this.calibrationSamples.filter(sample => 
-            sample.step === this.currentStep + 1
-        );
-        
-        if (stepSamples.length > 0) {
-            const avg = this.calculateAverage(stepSamples);
-            
-            // Calcula offset relativo à posição inicial
-            if (this.initialPosition) {
-                this.finalCalibration.x += (avg.gamma - this.initialPosition.gamma);
-                this.finalCalibration.y += (avg.beta - this.initialPosition.beta); 
-                this.finalCalibration.z += (avg.alpha - this.initialPosition.alpha);
-            }
-        }
-        
-        // Avança para próximo passo
-        this.currentStep++;
-        
-        if (this.currentStep >= this.calibrationSteps.length) {
-            this.finishCalibration();
-        } else {
-            this.updateUI();
-        }
+        if (window.threeJSVisualizer) window.threeJSVisualizer.setCalibrationMode(true, 0);
     }
 
     addCalibrationSample(gamma, beta, alpha) {
         if (!this.isCalibrating) return;
-        
-        this.calibrationSamples.push({
-            step: this.currentStep + 1,
-            gamma,
-            beta, 
-            alpha,
-            timestamp: Date.now()
-        });
-        
-        // Mantém apenas amostras recentes
-        const twoSecondsAgo = Date.now() - 2000;
-        this.calibrationSamples = this.calibrationSamples.filter(
-            sample => sample.timestamp > twoSecondsAgo
-        );
+        this.initialSamples.push({ gamma, beta, alpha, t: Date.now(), step: this.currentStep + 1 });
+        // mantém a janela temporal
+        const cutoff = Date.now() - this.samplesWindowMs;
+        this.initialSamples = this.initialSamples.filter(s => s.t >= cutoff);
     }
 
-    getRecentSamples() {
-        const oneSecondAgo = Date.now() - 1000;
-        return this.calibrationSamples.filter(
-            sample => sample.timestamp > oneSecondAgo && sample.step === 1
-        );
-    }
-
-    calculateAverage(samples) {
-        const sum = samples.reduce((acc, sample) => {
-            acc.gamma += sample.gamma;
-            acc.beta += sample.beta;
-            acc.alpha += sample.alpha;
-            return acc;
+    getAverageRecentSamples(stepId=1) {
+        const cutoff = Date.now() - this.samplesWindowMs;
+        const samples = this.initialSamples.filter(s => s.t >= cutoff && s.step === stepId);
+        if (!samples.length) return null;
+        const sum = samples.reduce((acc, s) => {
+            acc.gamma += s.gamma; acc.beta += s.beta; acc.alpha += s.alpha; return acc;
         }, { gamma: 0, beta: 0, alpha: 0 });
-        
-        const count = samples.length;
-        return {
-            gamma: sum.gamma / count,
-            beta: sum.beta / count,
-            alpha: sum.alpha / count
+        const n = samples.length;
+        return { gamma: sum.gamma / n, beta: sum.beta / n, alpha: sum.alpha / n };
+    }
+
+    confirmCurrentStep() {
+        if (!this.isCalibrating) return;
+
+        const step = this.calibrationSteps[this.currentStep];
+        if (!step) return;
+
+        // Passo inicial: definimos baseline como média das amostras recentes
+        if (step.isInitialStep) {
+            const avg = this.getAverageRecentSamples(1);
+            if (avg) {
+                this.baseline = { gamma: avg.gamma, beta: avg.beta, alpha: avg.alpha };
+                this.calibrationSteps[this.currentStep].completed = true;
+                // aplicar baseline no sistema principal
+                pointerSystem.calibration = { x: this.baseline.gamma, y: this.baseline.beta, z: this.baseline.alpha };
+                pointerSystem.resetFilter();
+                // enviar ao servidor
+                if (window.socket && window.socket.readyState === WebSocket.OPEN) {
+                    window.socket.send(JSON.stringify({ type: 'calibrate', orientation: pointerSystem.calibration }));
+                }
+                this.currentStep++;
+                this.updateUI();
+                showNotification('✅ Posição inicial definida e aplicada como baseline.');
+            } else {
+                showNotification('⚠️ Não há amostras suficientes. Mantenha o dispositivo estável e confirme novamente.');
+            }
+            return;
+        }
+
+        // Para passos seguintes apenas validamos alinhamento com target (feedback)
+        const recent = this.getAverageRecentSamples(this.currentStep + 1);
+        if (!recent) {
+            showNotification('⚠️ Não há amostras suficientes para este passo. Mova até o alvo e confirme.');
+            return;
+        }
+
+        const target = {
+            gamma: this.baseline.gamma + (step.targetOffset?.gamma || 0),
+            beta: this.baseline.beta + (step.targetOffset?.beta || 0),
+            alpha: normalizeAngle(this.baseline.alpha + (step.targetOffset?.alpha || 0))
         };
+
+        const diffGamma = Math.abs(angleDiff(recent.gamma, target.gamma));
+        const diffBeta = Math.abs(angleDiff(recent.beta, target.beta));
+        const diffAlpha = Math.abs(angleDiff(recent.alpha, target.alpha));
+
+        if (diffGamma <= step.tolerance && diffBeta <= step.tolerance && diffAlpha <= step.tolerance) {
+            this.calibrationSteps[this.currentStep].completed = true;
+            this.currentStep++;
+            this.updateUI();
+            showNotification(`✅ Passo ${step.id} confirmado.`);
+            if (this.currentStep >= this.calibrationSteps.length) {
+                this.finishCalibration();
+            }
+        } else {
+            showNotification(`⚠️ Alinhamento insuficiente. Diferenças: G:${diffGamma.toFixed(1)}°, B:${diffBeta.toFixed(1)}°, A:${diffAlpha.toFixed(1)}°. Ajuste e confirme novamente.`);
+        }
     }
 
     finishCalibration() {
-        // Calcula calibração final baseada nos offsets
-        const stepCount = this.calibrationSteps.length - 1; // Exclui passo inicial
-        if (stepCount > 0) {
-            this.finalCalibration.x /= stepCount;
-            this.finalCalibration.y /= stepCount;
-            this.finalCalibration.z /= stepCount;
-        }
-        
         this.isCalibrating = false;
-        
-        // Aplica calibração final
-        pointerSystem.calibration = this.finalCalibration;
-        
-        // Desativa modo de calibração no visualizador
-        if (window.threeJSVisualizer) {
-            window.threeJSVisualizer.setCalibrationMode(false);
-        }
-        
-        // Envia calibração para servidor
-        if (window.socket && window.socket.readyState === WebSocket.OPEN) {
-            window.socket.send(JSON.stringify({
-                type: 'calibrate',
-                orientation: this.finalCalibration
-            }));
-        }
-        
+        if (window.threeJSVisualizer) window.threeJSVisualizer.setCalibrationMode(false);
+        // já definimos baseline no passo 1; aqui apenas damos feedback
         this.updateUI();
-        showNotification('🎉 Calibração concluída com sucesso!');
+        showNotification('🎉 Calibração concluída. Baseline aplicada.');
     }
 
     getCurrentStep() {
-        if (!this.isCalibrating || this.currentStep >= this.calibrationSteps.length) {
-            return null;
-        }
-        return this.calibrationSteps[this.currentStep];
-    }
-
-    getTargetOrientation(currentGamma, currentBeta, currentAlpha) {
-        const currentStep = this.getCurrentStep();
-        if (!currentStep || !this.initialPosition || currentStep.isInitialStep) {
-            return null;
-        }
-        
-        return {
-            gamma: this.initialPosition.gamma + (currentStep.targetOffset?.gamma || 0),
-            beta: this.initialPosition.beta + (currentStep.targetOffset?.beta || 0),
-            alpha: this.initialPosition.alpha + (currentStep.targetOffset?.alpha || 0)
-        };
-    }
-
-    isAlignedWithTarget(gamma, beta, alpha) {
-        const target = this.getTargetOrientation(gamma, beta, alpha);
-        if (!target) return false;
-        
-        const currentStep = this.getCurrentStep();
-        const diffGamma = Math.abs(gamma - target.gamma);
-        const diffBeta = Math.abs(beta - target.beta);
-        const diffAlpha = Math.abs(alpha - target.alpha);
-        
-        return diffGamma <= currentStep.tolerance && 
-               diffBeta <= currentStep.tolerance && 
-               diffAlpha <= currentStep.tolerance;
+        if (!this.isCalibrating) return null;
+        return this.calibrationSteps[this.currentStep] || null;
     }
 
     getProgress() {
@@ -315,51 +214,34 @@ class PositionBasedCalibrationSystem {
     }
 
     updateUI() {
-        // Atualiza passos
         this.calibrationSteps.forEach((step, index) => {
-            const element = document.getElementById(`step${step.id}`);
-            if (element) {
-                element.className = 'calibration-step';
-                if (index === this.currentStep) {
-                    element.classList.add('active');
-                } else if (index < this.currentStep) {
-                    element.classList.add('completed');
-                }
-            }
+            const el = document.getElementById(`step${step.id}`);
+            if (!el) return;
+            el.className = 'calibration-step';
+            if (index === this.currentStep && this.isCalibrating) el.classList.add('active');
+            if (step.completed) el.classList.add('completed');
         });
-        
-        // Atualiza progresso
+
         const progressFill = document.getElementById('progressFill');
         const progressText = document.getElementById('progressText');
         if (progressFill && progressText) {
             const progress = this.getProgress();
             progressFill.style.width = `${progress}%`;
-            
             if (this.isCalibrating) {
-                const currentStep = this.getCurrentStep();
-                progressText.textContent = currentStep ? 
-                    `Passo ${this.currentStep + 1} de ${this.calibrationSteps.length}: ${currentStep.description}` :
-                    'Calibração em andamento...';
+                const cs = this.getCurrentStep();
+                progressText.textContent = cs ? `Passo ${this.currentStep + 1}: ${cs.description || cs.title}` : 'Calibrando...';
             } else {
                 progressText.textContent = 'Pronto para começar';
             }
         }
-        
-        // Atualiza botão iniciar
-        const startBtn = document.getElementById('startCalibrationBtn');
-        if (startBtn) {
-            startBtn.disabled = this.isCalibrating;
-            startBtn.textContent = this.isCalibrating ? 'Calibrando...' : 'Iniciar Calibração';
-        }
-        
-        // Atualiza informação da posição inicial
+
         const initialPositionInfo = document.getElementById('initialPositionInfo');
         if (initialPositionInfo) {
-            if (this.initialPosition) {
-                initialPositionInfo.innerHTML = '✅ Posição inicial definida: ' +
-                    `${this.initialPosition.gamma.toFixed(1)}°, ` +
-                    `${this.initialPosition.beta.toFixed(1)}°, ` +
-                    `${this.initialPosition.alpha.toFixed(1)}°`;
+            if (this.baseline) {
+                initialPositionInfo.innerHTML = '✅ Posição inicial definida (baseline): ' +
+                    `${this.baseline.gamma.toFixed(1)}°, ` +
+                    `${this.baseline.beta.toFixed(1)}°, ` +
+                    `${this.baseline.alpha.toFixed(1)}°`;
                 initialPositionInfo.style.borderColor = 'var(--success)';
                 initialPositionInfo.style.background = 'rgba(16, 185, 129, 0.1)';
             } else {
@@ -371,109 +253,97 @@ class PositionBasedCalibrationSystem {
     }
 
     updateDeviceVisualization(gamma, beta, alpha) {
-        const deviceVisualizer = document.querySelector('.device-visualizer-3d');
-        
-        if (deviceVisualizer) {
-            // Remove todas as classes de estado
-            deviceVisualizer.classList.remove(
-                'calibration-active', 
-                'calibration-aligned', 
-                'calibration-pulse',
-                'loading',
-                'error',
-                'status-connected',
-                'status-disconnected',
-                'status-active'
-            );
-            
-            // Atualizar visualizador Three.js se disponível
-            if (window.threeJSVisualizer) {
-                window.threeJSVisualizer.updateOrientation(alpha, beta, gamma);
-                
-                // Atualizar modo de calibração
-                const currentStep = this.getCurrentStep();
-                if (currentStep && this.isCalibrating) {
-                    window.threeJSVisualizer.setCalibrationMode(true, this.currentStep);
-                    deviceVisualizer.classList.add('calibration-active', 'calibration-pulse');
-                    
-                    const isAligned = this.isAlignedWithTarget(gamma, beta, alpha);
-                    if (isAligned) {
-                        deviceVisualizer.classList.add('calibration-aligned');
-                    }
-                    deviceVisualizer.classList.add('status-active');
-                } else {
-                    window.threeJSVisualizer.setCalibrationMode(false);
-                    
-                    // Adicionar classe de status baseado na conexão
-                    if (window.socket && window.socket.readyState === WebSocket.OPEN) {
-                        deviceVisualizer.classList.add('status-connected');
-                    } else {
-                        deviceVisualizer.classList.add('status-disconnected');
-                    }
+        const dv = document.querySelector('.device-visualizer-3d');
+        if (!dv) return;
+
+        dv.classList.remove('calibration-active', 'calibration-aligned', 'calibration-pulse', 'loading', 'error', 'status-connected', 'status-disconnected', 'status-active');
+
+        if (window.threeJSVisualizer) {
+            window.threeJSVisualizer.updateOrientation(alpha, beta, gamma);
+
+            const currentStep = this.getCurrentStep();
+            if (currentStep && this.isCalibrating) {
+                window.threeJSVisualizer.setCalibrationMode(true, this.currentStep);
+                dv.classList.add('calibration-active', 'calibration-pulse');
+                // verificar alinhamento para feedback visual
+                const target = currentStep.isInitialStep ? null : {
+                    gamma: this.baseline ? this.baseline.gamma + (currentStep.targetOffset?.gamma || 0) : null,
+                    beta: this.baseline ? this.baseline.beta + (currentStep.targetOffset?.beta || 0) : null,
+                    alpha: this.baseline ? normalizeAngle(this.baseline.alpha + (currentStep.targetOffset?.alpha || 0)) : null
+                };
+                let isAligned = false;
+                if (target && this.baseline) {
+                    const dG = Math.abs(angleDiff(gamma, target.gamma));
+                    const dB = Math.abs(angleDiff(beta, target.beta));
+                    const dA = Math.abs(angleDiff(alpha, target.alpha));
+                    isAligned = (dG <= currentStep.tolerance && dB <= currentStep.tolerance && dA <= currentStep.tolerance);
                 }
+                if (isAligned) dv.classList.add('calibration-aligned');
+                dv.classList.add('status-active');
+            } else {
+                window.threeJSVisualizer.setCalibrationMode(false);
+                if (window.socket && window.socket.readyState === WebSocket.OPEN) dv.classList.add('status-connected');
+                else dv.classList.add('status-disconnected');
             }
         }
-        
+
         const orientationIndicator = document.getElementById('orientationIndicator');
         if (orientationIndicator) {
-            orientationIndicator.textContent = 
+            orientationIndicator.textContent =
                 `X:${Math.round(gamma)}° Y:${Math.round(beta)}° Z:${Math.round(alpha)}°`;
         }
     }
 }
 
-// ===== SISTEMA DE CONTROLE PRINCIPAL =====
+// ===== SISTEMA DE CONTROLE PRINCIPAL (AJUSTADO) =====
 class AdvancedPointerSystem {
     constructor() {
-        // Configurações locais - cada dispositivo tem suas próprias
-        this.pointerSensitivity = 60;
-        this.smoothingFactor = 0.75;
+        this.pointerSensitivity = 60; // graus que cobrem a tela inteira
+        this.smoothingFactor = 0.75; // como 0..1 (quanto maior, mais suave)
         this.compensation = 2;
         this.sensorFusion = true;
+        // calibration agora guarda baseline: { x: gamma, y: beta, z: alpha }
         this.calibration = { x: 0, y: 0, z: 0 };
         this.screenWidth = 1920;
         this.screenHeight = 1080;
         this.filteredPosition = { x: this.screenWidth / 2, y: this.screenHeight / 2 };
         this.frameCount = 0;
         this.lastFpsUpdate = 0;
-        
-        // Sistema de calibração baseado na posição inicial
         this.calibrationSystem = new PositionBasedCalibrationSystem();
-        
-        // Carregar configurações salvas
         this.loadSettings();
     }
 
-    // Carregar configurações do localStorage
     loadSettings() {
         const saved = localStorage.getItem('aimpointer_settings');
         if (saved) {
-            const settings = JSON.parse(saved);
-            this.pointerSensitivity = settings.sensitivity || 60;
-            this.smoothingFactor = (settings.smoothing || 75) / 100;
-            this.compensation = settings.compensation || 2;
-            this.sensorFusion = settings.sensor_fusion !== false;
-            
-            // Atualizar UI
-            if (document.getElementById('sensitivity')) {
-                document.getElementById('sensitivity').value = this.pointerSensitivity;
-                document.getElementById('sensitivityValue').textContent = this.pointerSensitivity;
-            }
-            if (document.getElementById('smoothingFactor')) {
-                document.getElementById('smoothingFactor').value = Math.round(this.smoothingFactor * 100);
-                document.getElementById('smoothingValue').textContent = Math.round(this.smoothingFactor * 100);
-            }
-            if (document.getElementById('compensation')) {
-                document.getElementById('compensation').value = this.compensation;
-                document.getElementById('compensationValue').textContent = this.compensation;
-            }
-            if (document.getElementById('sensorFusionToggle')) {
-                document.getElementById('sensorFusionToggle').checked = this.sensorFusion;
+            try {
+                const settings = JSON.parse(saved);
+                this.pointerSensitivity = settings.sensitivity || 60;
+                this.smoothingFactor = ((settings.smoothing || 75) / 100);
+                this.compensation = settings.compensation || 2;
+                this.sensorFusion = settings.sensor_fusion !== false;
+
+                if (document.getElementById('sensitivity')) {
+                    document.getElementById('sensitivity').value = this.pointerSensitivity;
+                    document.getElementById('sensitivityValue').textContent = this.pointerSensitivity;
+                }
+                if (document.getElementById('smoothingFactor')) {
+                    document.getElementById('smoothingFactor').value = Math.round(this.smoothingFactor * 100);
+                    document.getElementById('smoothingValue').textContent = Math.round(this.smoothingFactor * 100);
+                }
+                if (document.getElementById('compensation')) {
+                    document.getElementById('compensation').value = this.compensation;
+                    document.getElementById('compensationValue').textContent = this.compensation;
+                }
+                if (document.getElementById('sensorFusionToggle')) {
+                    document.getElementById('sensorFusionToggle').checked = this.sensorFusion;
+                }
+            } catch (e) {
+                console.warn('Falha ao carregar settings:', e);
             }
         }
     }
 
-    // Salvar configurações no localStorage
     saveSettings() {
         const settings = {
             sensitivity: this.pointerSensitivity,
@@ -484,104 +354,93 @@ class AdvancedPointerSystem {
         localStorage.setItem('aimpointer_settings', JSON.stringify(settings));
     }
 
-    calculateAbsolutePosition(gamma, beta, alpha) {
-        // Aplica calibração atual
-        const calibratedGamma = gamma - this.calibration.x;
-        const calibratedBeta = beta - this.calibration.y;
-        const calibratedAlpha = alpha - this.calibration.z;
-        
-        // Atualiza visualização da calibração
-        this.calibrationSystem.updateDeviceVisualization(gamma, beta, alpha);
-        
-        // Adiciona amostra se estiver calibrando
-        if (this.calibrationSystem.isCalibrating) {
-            this.calibrationSystem.addCalibrationSample(gamma, beta, alpha);
-        }
-        
-        if (this.sensorFusion) {
-            return this.calculateWithSensorFusion(calibratedGamma, calibratedBeta, calibratedAlpha);
-        } else {
-            return this.calculateSimple(calibratedGamma, calibratedBeta);
-        }
-    }
-
-    calculateSimple(calibratedGamma, calibratedBeta) {
-        const relX = calibratedGamma / (this.pointerSensitivity / 2);
-        const relY = -calibratedBeta / (this.pointerSensitivity / 2);
-        
-        let absX = (relX * (this.screenWidth / 2)) + (this.screenWidth / 2);
-        let absY = (relY * (this.screenHeight / 2)) + (this.screenHeight / 2);
-        
-        absX = Math.max(0, Math.min(this.screenWidth - 1, absX));
-        absY = Math.max(0, Math.min(this.screenHeight - 1, absY));
-        
-        this.filteredPosition.x = this.smoothingFactor * this.filteredPosition.x + (1 - this.smoothingFactor) * absX;
-        this.filteredPosition.y = this.smoothingFactor * this.filteredPosition.y + (1 - this.smoothingFactor) * absY;
-        
-        return { x: this.filteredPosition.x, y: this.filteredPosition.y };
-    }
-
-    calculateWithSensorFusion(calibratedGamma, calibratedBeta, calibratedAlpha) {
-        const radAlpha = calibratedAlpha * Math.PI / 180;
-        const cosA = Math.cos(radAlpha);
-        const sinA = Math.sin(radAlpha);
-        
-        const compensatedGamma = calibratedGamma * cosA - calibratedBeta * sinA;
-        const compensatedBeta = calibratedGamma * sinA + calibratedBeta * cosA;
-        
-        const compensationFactor = 1 + (this.compensation * 0.1);
-        const adjGamma = compensatedGamma * compensationFactor;
-        const adjBeta = compensatedBeta * compensationFactor;
-        
-        const relX = adjGamma / (this.pointerSensitivity / 2);
-        const relY = -adjBeta / (this.pointerSensitivity / 2);
-        
-        let absX = (relX * (this.screenWidth / 2)) + (this.screenWidth / 2);
-        let absY = (relY * (this.screenHeight / 2)) + (this.screenHeight / 2);
-        
-        absX = Math.max(0, Math.min(this.screenWidth - 1, absX));
-        absY = Math.max(0, Math.min(this.screenHeight - 1, absY));
-        
-        this.filteredPosition.x = this.smoothingFactor * this.filteredPosition.x + (1 - this.smoothingFactor) * absX;
-        this.filteredPosition.y = this.smoothingFactor * this.filteredPosition.y + (1 - this.smoothingFactor) * absY;
-        
-        return { x: this.filteredPosition.x, y: this.filteredPosition.y };
-    }
-
-    startAdvancedCalibration() {
-        this.calibrationSystem.startCalibration();
-    }
-
-    confirmStep(stepNumber) {
-        if (this.calibrationSystem.isCalibrating && 
-            this.calibrationSystem.currentStep === stepNumber - 1) {
-            this.calibrationSystem.confirmCurrentStep();
-        }
-    }
-
     setScreenResolution(width, height) {
         this.screenWidth = width;
         this.screenHeight = height;
         this.filteredPosition = { x: width / 2, y: height / 2 };
     }
 
-    setSensitivity(value) {
-        this.pointerSensitivity = value;
-        this.saveSettings();
-    }
-
-    setSmoothingFactor(value) {
-        this.smoothingFactor = value / 100;
-        this.saveSettings();
-    }
-
-    setCompensation(value) {
-        this.compensation = value;
-        this.saveSettings();
-    }
-
     resetFilter() {
         this.filteredPosition = { x: this.screenWidth / 2, y: this.screenHeight / 2 };
+    }
+
+    setSensitivity(v) {
+        this.pointerSensitivity = v;
+        this.saveSettings();
+    }
+
+    setSmoothingFactor(v) {
+        this.smoothingFactor = v / 100;
+        this.saveSettings();
+    }
+
+    setCompensation(v) {
+        this.compensation = v;
+        this.saveSettings();
+    }
+
+    // Função central: converte orientação direta do dispositivo para posição absoluta
+    calculateAbsolutePosition(gamma, beta, alpha) {
+        // Se não houver baseline definida, usar current como baseline (ou manter zero)
+        const baselineGamma = (this.calibration && typeof this.calibration.x === 'number') ? this.calibration.x : 0;
+        const baselineBeta = (this.calibration && typeof this.calibration.y === 'number') ? this.calibration.y : 0;
+        const baselineAlpha = (this.calibration && typeof this.calibration.z === 'number') ? this.calibration.z : 0;
+
+        // Atualiza visualizador e coleta amostras de calibração se necessário
+        this.calibrationSystem.updateDeviceVisualization(gamma, beta, alpha);
+        if (this.calibrationSystem.isCalibrating) {
+            this.calibrationSystem.addCalibrationSample(gamma, beta, alpha);
+        }
+
+        // Delta angular (diferença mínima assinada)
+        const deltaGamma = angleDiff(gamma, baselineGamma); // left-right
+        const deltaBeta = angleDiff(beta, baselineBeta);    // front-back
+        const deltaAlpha = angleDiff(alpha, baselineAlpha); // rotation
+
+        // Limitar os deltas para evitar números extremos
+        // Assumimos que gamma normalmente está dentro de [-90, 90] e beta [-180,180]
+        const maxGamma = 90;
+        const maxBeta = 180;
+        const clampedGamma = Math.max(-maxGamma, Math.min(maxGamma, deltaGamma));
+        const clampedBeta = Math.max(-maxBeta, Math.min(maxBeta, deltaBeta));
+
+        // Mapear ângulos para posições relativas:
+        // pointerSensitivity define quantos graus cobrem a tela inteira.
+        // Portanto metade da sensibilidade corresponde a deslocamento até a borda.
+        const halfSens = this.pointerSensitivity / 2;
+        let relX = clampedGamma / halfSens; // -1 .. 1 (aprox)
+        let relY = -clampedBeta / halfSens; // invertido para que inclinar pra frente diminua Y, por exemplo
+
+        // Se sensor fusion ativo, aplicar rotação por alpha (compensação)
+        if (this.sensorFusion) {
+            const radA = (deltaAlpha) * Math.PI / 180;
+            const cosA = Math.cos(radA);
+            const sinA = Math.sin(radA);
+            const compFactor = 1 + (this.compensation * 0.05); // leve ajuste
+            // rotaciona o vetor (relX, relY)
+            const rx = relX * cosA - relY * sinA;
+            const ry = relX * sinA + relY * cosA;
+            relX = rx * compFactor;
+            relY = ry * compFactor;
+        }
+
+        // Clamp final dos relativos para evitar extrapolação
+        relX = Math.max(-1, Math.min(1, relX));
+        relY = Math.max(-1, Math.min(1, relY));
+
+        // Converte para absolute screen coords
+        let absX = (relX * (this.screenWidth / 2)) + (this.screenWidth / 2);
+        let absY = (relY * (this.screenHeight / 2)) + (this.screenHeight / 2);
+
+        // Aplicar suavização (filtro exponencial simples)
+        this.filteredPosition.x = this.smoothingFactor * this.filteredPosition.x + (1 - this.smoothingFactor) * absX;
+        this.filteredPosition.y = this.smoothingFactor * this.filteredPosition.y + (1 - this.smoothingFactor) * absY;
+
+        // Garantir dentro de tela
+        this.filteredPosition.x = Math.max(0, Math.min(this.screenWidth - 1, this.filteredPosition.x));
+        this.filteredPosition.y = Math.max(0, Math.min(this.screenHeight - 1, this.filteredPosition.y));
+
+        return { x: this.filteredPosition.x, y: this.filteredPosition.y };
     }
 
     updateFPS() {
@@ -599,6 +458,14 @@ class AdvancedPointerSystem {
     calculateAccuracy(gamma, beta) {
         const stability = Math.abs(gamma) + Math.abs(beta);
         return Math.max(0, 100 - Math.min(stability, 50));
+    }
+
+    startAdvancedCalibration() {
+        this.calibrationSystem.startCalibration();
+    }
+
+    confirmStep(stepNumber) {
+        this.calibrationSystem.confirmCurrentStep();
     }
 }
 
@@ -631,15 +498,14 @@ function updateUI() {
         connectBtn.textContent = 'Conectar WebSocket';
         connectBtn.classList.remove('connected');
     }
-    
-    sensorBtn.textContent = sensorsActive ? 
+
+    sensorBtn.textContent = sensorsActive ?
         'Desativar Sensores' : 'Ativar Sensores';
     sensorBtn.classList.toggle('active', sensorsActive);
-    
-    // Atualiza dispositivo atual
+
     const thisDeviceDot = document.getElementById('thisDeviceDot');
     if (thisDeviceDot) {
-        thisDeviceDot.style.background = 
+        thisDeviceDot.style.background =
             (socket && socket.readyState === WebSocket.OPEN) ? 'var(--success)' : 'var(--error)';
     }
 }
@@ -662,52 +528,53 @@ function toggleWebSocket() {
 function connectWebSocket() {
     const ip = document.getElementById('serverIp').value.trim();
     if (!ip) return alert('Digite o IP do servidor!');
-    
     const wsUrl = `wss://${ip}:8765`;
-    
-    // Fechar conexão existente se houver
+
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.close();
     }
-    
+
     socket = new WebSocket(wsUrl);
     window.socket = socket;
-    
+
     socket.onopen = () => {
         console.log('✅ WebSocket conectado com sucesso');
         updateUI();
     };
-    
+
     socket.onmessage = (e) => {
         try {
             const data = JSON.parse(e.data);
-            
-            // Apenas processa informações essenciais
             if (data.calibration) {
                 pointerSystem.calibration = data.calibration;
+                // também atualizar baseline na sub-sistema de calibração
+                if (pointerSystem.calibrationSystem) {
+                    pointerSystem.calibrationSystem.baseline = {
+                        gamma: data.calibration.x,
+                        beta: data.calibration.y,
+                        alpha: data.calibration.z
+                    };
+                }
             }
-            
+
             if (data.screen_width && data.screen_height) {
                 pointerSystem.setScreenResolution(data.screen_width, data.screen_height);
                 const resolutionInfo = document.getElementById('resolutionInfo');
-                if (resolutionInfo) {
-                    resolutionInfo.textContent = `${data.screen_width}x${data.screen_height}`;
-                }
+                if (resolutionInfo) resolutionInfo.textContent = `${data.screen_width}x${data.screen_height}`;
             }
-            
+
             updateUI();
-            
-        } catch(err) {
+        } catch (err) {
             console.error('Erro ao processar mensagem:', err);
         }
     };
-    
+
     socket.onclose = () => {
         console.log('WebSocket desconectado');
         sensorsActive = false;
         updateUI();
     };
-    
+
     socket.onerror = (error) => {
         console.error('Erro WebSocket:', error);
         alert('Erro ao conectar com o servidor. Verifique o IP e se o servidor está rodando.');
@@ -715,11 +582,8 @@ function connectWebSocket() {
 }
 
 function toggleSensors() {
-    if (!sensorsActive) {
-        startSensors();
-    } else {
-        stopSensors();
-    }
+    if (!sensorsActive) startSensors();
+    else stopSensors();
 }
 
 function startSensors() {
@@ -727,9 +591,8 @@ function startSensors() {
         alert('Seu navegador não suporta a API de orientação do dispositivo.');
         return;
     }
-    
+
     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        // iOS 13+ precisa de permissão
         DeviceOrientationEvent.requestPermission()
             .then(permissionState => {
                 if (permissionState === 'granted') {
@@ -742,7 +605,6 @@ function startSensors() {
             })
             .catch(console.error);
     } else {
-        // Navegadores que não precisam de permissão
         setupOrientationListener();
         sensorsActive = true;
         updateUI();
@@ -760,33 +622,26 @@ function setupOrientationListener() {
 }
 
 function handleOrientation(event) {
-    const gamma = event.gamma;  // Inclinação esquerda-direita (-90 a 90)
-    const beta = event.beta;    // Inclinação frente-trás (-180 a 180)
-    const alpha = event.alpha;  // Orientação (0 a 360)
-    
-    // Atualizar dados dos sensores na UI
+    const gamma = (typeof event.gamma === 'number') ? event.gamma : 0;
+    const beta = (typeof event.beta === 'number') ? event.beta : 0;
+    const alpha = (typeof event.alpha === 'number') ? event.alpha : 0;
+
     updateSensorData(gamma, beta, alpha);
-    
-    // Calcular posição do cursor
+
     const position = pointerSystem.calculateAbsolutePosition(gamma, beta, alpha);
-    
-    // Atualizar crosshair visual
+
     updateCrosshair(position.x, position.y);
-    
-    // Enviar para servidor (com throttling)
+
     const now = Date.now();
     if (now - lastSendTime >= SEND_INTERVAL) {
         sendPositionToServer(position.x, position.y);
         lastSendTime = now;
     }
-    
-    // Atualizar FPS
+
     const fps = pointerSystem.updateFPS();
     if (fps !== null) {
         const fpsCounter = document.getElementById('fpsCounter');
-        if (fpsCounter) {
-            fpsCounter.textContent = fps;
-        }
+        if (fpsCounter) fpsCounter.textContent = fps;
     }
 }
 
@@ -795,7 +650,7 @@ function updateSensorData(gamma, beta, alpha) {
     const directionY = document.getElementById('directionY');
     const directionZ = document.getElementById('directionZ');
     const accuracy = document.getElementById('accuracy');
-    
+
     if (directionX) directionX.textContent = Math.round(gamma) + '°';
     if (directionY) directionY.textContent = Math.round(beta) + '°';
     if (directionZ) directionZ.textContent = Math.round(alpha) + '°';
@@ -804,14 +659,11 @@ function updateSensorData(gamma, beta, alpha) {
 
 function updateCrosshair(x, y) {
     if (!crosshair) return;
-    
     const pointerContainer = document.querySelector('.pointer-container');
     if (!pointerContainer) return;
-    
     const containerRect = pointerContainer.getBoundingClientRect();
     const relativeX = (x / pointerSystem.screenWidth) * containerRect.width;
     const relativeY = (y / pointerSystem.screenHeight) * containerRect.height;
-    
     crosshair.style.left = relativeX + 'px';
     crosshair.style.top = relativeY + 'px';
 }
@@ -828,19 +680,13 @@ function sendPositionToServer(x, y) {
 
 function leftClick() {
     if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: 'click',
-            button: 'left'
-        }));
+        socket.send(JSON.stringify({ type: 'click', button: 'left' }));
     }
 }
 
 function rightClick() {
     if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: 'click',
-            button: 'right'
-        }));
+        socket.send(JSON.stringify({ type: 'click', button: 'right' }));
     }
 }
 
@@ -854,29 +700,22 @@ function confirmStep(stepNumber) {
 
 function resetCalibration() {
     if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: 'reset_calibration'
-        }));
+        socket.send(JSON.stringify({ type: 'reset_calibration' }));
     }
-    
+
     pointerSystem.calibration = { x: 0, y: 0, z: 0 };
-    pointerSystem.calibrationSystem.initialPosition = null;
+    pointerSystem.calibrationSystem.baseline = null;
     pointerSystem.calibrationSystem.isCalibrating = false;
     pointerSystem.calibrationSystem.currentStep = 0;
     pointerSystem.calibrationSystem.calibrationSteps.forEach(step => step.completed = false);
     pointerSystem.calibrationSystem.updateUI();
-    
-    // Resetar visualizador
-    if (window.threeJSVisualizer) {
-        window.threeJSVisualizer.setCalibrationMode(false);
-    }
-    
+
+    if (window.threeJSVisualizer) window.threeJSVisualizer.setCalibrationMode(false);
     showNotification('🔃 Calibração resetada!');
 }
 
 // ===== CONFIGURAÇÕES DE CONTROLE =====
 function setupEventListeners() {
-    // Sensibilidade
     const sensitivitySlider = document.getElementById('sensitivity');
     if (sensitivitySlider) {
         sensitivitySlider.addEventListener('input', function() {
@@ -886,8 +725,7 @@ function setupEventListeners() {
             pointerSystem.setSensitivity(value);
         });
     }
-    
-    // Suavização
+
     const smoothingSlider = document.getElementById('smoothingFactor');
     if (smoothingSlider) {
         smoothingSlider.addEventListener('input', function() {
@@ -897,8 +735,7 @@ function setupEventListeners() {
             pointerSystem.setSmoothingFactor(value);
         });
     }
-    
-    // Compensação
+
     const compensationSlider = document.getElementById('compensation');
     if (compensationSlider) {
         compensationSlider.addEventListener('input', function() {
@@ -908,8 +745,7 @@ function setupEventListeners() {
             pointerSystem.setCompensation(value);
         });
     }
-    
-    // Fusão de sensores
+
     const sensorFusionToggle = document.getElementById('sensorFusionToggle');
     if (sensorFusionToggle) {
         sensorFusionToggle.addEventListener('change', function() {
@@ -921,10 +757,7 @@ function setupEventListeners() {
 
 // ===== FUNÇÕES AUXILIARES =====
 function showNotification(message) {
-    // Implementação simples de notificação - pode ser melhorada com um sistema de toasts
     console.log('💬 ' + message);
-    
-    // Criar um elemento de notificação temporário
     const notification = document.createElement('div');
     notification.textContent = message;
     notification.style.cssText = `
@@ -941,55 +774,40 @@ function showNotification(message) {
         font-weight: 500;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     `;
-    
     document.body.appendChild(notification);
-    
-    // Remover após 3 segundos
     setTimeout(() => {
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-        }
+        if (notification.parentNode) notification.parentNode.removeChild(notification);
     }, 3000);
 }
 
 // ===== INICIALIZAÇÃO PRINCIPAL =====
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🎯 DOM carregado, inicializando AimPointer...');
-    
-    // Configurar event listeners
+
     setupEventListeners();
-    
-    // Pequeno delay para garantir que tudo esteja carregado
+
     setTimeout(() => {
         initialize3DVisualizer();
-        
-        // Re-inicializar quando abrir o painel de configurações
+
         const configButton = document.querySelector('.config-header-btn');
         if (configButton) {
             configButton.addEventListener('click', function() {
                 console.log('⚙️ Painel de configurações aberto - reinicializando visualizador 3D');
                 setTimeout(initialize3DVisualizer, 300);
-                
-                // Executar diagnóstico se segurar Shift
                 setTimeout(() => {
-                    if (window.event && window.event.shiftKey) {
-                        diagnose3DProblem();
-                    }
+                    if (window.event && window.event.shiftKey) diagnose3DProblem();
                 }, 500);
             });
         }
-        
-        // Também inicializar quando a janela for redimensionada
+
         window.addEventListener('resize', function() {
             if (window.threeJSVisualizer && typeof window.threeJSVisualizer.onWindowResize === 'function') {
                 window.threeJSVisualizer.onWindowResize();
             }
         });
-        
     }, 1000);
 });
 
-// Tornar funções globais para acesso via HTML
 window.toggleConfig = toggleConfig;
 window.toggleWebSocket = toggleWebSocket;
 window.toggleSensors = toggleSensors;
