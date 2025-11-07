@@ -33,6 +33,7 @@ function toggleConfig() {
 
     console.log(`toggleConfig: painel agora ${panel.classList.contains('open') ? 'aberto' : 'fechado'}`);
 
+    // Acessibilidade: mover foco para o painel ao abrir, ou para o botão ao fechar
     if (panel.classList.contains('open')) {
         const closeBtn = panel.querySelector('.close-config');
         if (closeBtn) closeBtn.focus();
@@ -542,24 +543,52 @@ function connectWebSocket() {
 }
 
 // ===== SENSORES: Orientation + Motion (Acelerômetro) =====
-function setupOrientationListener() {
-    window.addEventListener('deviceorientation', handleOrientation, { passive: true });
+// Implementações robustas para permissões e listeners (evitam duplicação)
+let _orientationListenerAdded = false;
+let _motionListenerAdded = false;
+
+function handleOrientationSafe(ev) {
+    try {
+        handleOrientation(ev);
+    } catch (err) {
+        console.error('Erro em handleOrientationSafe:', err);
+    }
 }
+
+function setupOrientationListener() {
+    if (_orientationListenerAdded) return;
+    window.addEventListener('deviceorientation', handleOrientationSafe, { passive: true });
+    _orientationListenerAdded = true;
+    console.log('setupOrientationListener: adicionado');
+}
+
 function teardownOrientationListener() {
-    window.removeEventListener('deviceorientation', handleOrientation);
+    if (!_orientationListenerAdded) return;
+    window.removeEventListener('deviceorientation', handleOrientationSafe);
+    _orientationListenerAdded = false;
+    console.log('teardownOrientationListener: removido');
+}
+
+function handleMotionSafe(ev) {
+    try {
+        handleMotion(ev);
+    } catch (err) {
+        console.error('Erro em handleMotionSafe:', err);
+    }
 }
 
 function setupMotionListener() {
-    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-        DeviceMotionEvent.requestPermission().catch(() => {}).then(res => {
-            window.addEventListener('devicemotion', handleMotion, { passive: true });
-        });
-    } else {
-        window.addEventListener('devicemotion', handleMotion, { passive: true });
-    }
+    if (_motionListenerAdded) return;
+    window.addEventListener('devicemotion', handleMotionSafe, { passive: true });
+    _motionListenerAdded = true;
+    console.log('setupMotionListener: adicionado');
 }
+
 function teardownMotionListener() {
-    window.removeEventListener('devicemotion', handleMotion);
+    if (!_motionListenerAdded) return;
+    window.removeEventListener('devicemotion', handleMotionSafe);
+    _motionListenerAdded = false;
+    console.log('teardownMotionListener: removido');
 }
 
 function handleMotion(ev) {
@@ -615,6 +644,85 @@ function handleOrientation(event) {
     }
 }
 
+// ===== Controles de sensores (assíncronos e robustos) =====
+async function toggleSensors() {
+    try {
+        if (!sensorsActive) {
+            await startSensors();
+        } else {
+            stopSensors();
+        }
+    } catch (err) {
+        console.error('toggleSensors:', err);
+    }
+}
+
+async function startSensors() {
+    if (typeof DeviceOrientationEvent === 'undefined') {
+        showNotification('⚠️ Seu navegador NÃO suporta DeviceOrientation.');
+        throw new Error('DeviceOrientationEvent not supported');
+    }
+
+    try {
+        // pedir permissão iOS para orientation
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+                const perm = await DeviceOrientationEvent.requestPermission();
+                if (perm !== 'granted') {
+                    showNotification('❌ Permissão para orientação negada.');
+                    throw new Error('Permission denied for DeviceOrientationEvent');
+                }
+            } catch (errPerm) {
+                console.warn('DeviceOrientationEvent.requestPermission error:', errPerm);
+                throw errPerm;
+            }
+        }
+
+        setupOrientationListener();
+
+        if (useAccelerometer) {
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                try {
+                    const mp = await DeviceMotionEvent.requestPermission();
+                    if (mp === 'granted') {
+                        setupMotionListener();
+                    } else {
+                        console.warn('Motion permission not granted:', mp);
+                        showNotification('⚠️ Permissão para acelerômetro negada. A fusão ficará desativada.');
+                        teardownMotionListener();
+                    }
+                } catch (errPermMotion) {
+                    console.warn('DeviceMotionEvent.requestPermission error (trying fallback):', errPermMotion);
+                    try { setupMotionListener(); } catch (e) { console.warn('setupMotionListener failed', e); }
+                }
+            } else {
+                setupMotionListener();
+            }
+        } else {
+            teardownMotionListener();
+        }
+
+        sensorsActive = true;
+        updateUI();
+        showNotification('📡 Sensores ativados');
+        console.log('startSensors: sensores ativados (orientationListenerAdded=', _orientationListenerAdded, ', motionListenerAdded=', _motionListenerAdded, ')');
+    } catch (err) {
+        sensorsActive = false;
+        updateUI();
+        console.error('startSensors falhou:', err);
+        throw err;
+    }
+}
+
+function stopSensors() {
+    teardownOrientationListener();
+    teardownMotionListener();
+    sensorsActive = false;
+    updateUI();
+    showNotification('🔕 Sensores desativados');
+    console.log('stopSensors: sensores desativados');
+}
+
 // ===== UI Helpers =====
 function updateSensorData(gamma, beta, alpha) {
     const directionX = document.getElementById('directionX');
@@ -659,47 +767,6 @@ function rightClick() {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'click', button: 'right' }));
     }
-}
-
-// ===== Controles de sensores =====
-function startSensors() {
-    if (typeof DeviceOrientationEvent === 'undefined') {
-        alert('Seu navegador não suporta a API de orientação do dispositivo.');
-        return;
-    }
-
-    const requestOrientationPermission = () => {
-        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-            return DeviceOrientationEvent.requestPermission().catch(() => {}).then(p => p);
-        }
-        return Promise.resolve('granted');
-    };
-
-    requestOrientationPermission().then(permissionState => {
-        if (permissionState === 'granted' || permissionState === undefined) {
-            setupOrientationListener();
-            if (useAccelerometer) setupMotionListener();
-            sensorsActive = true;
-            updateUI();
-            showNotification('📡 Sensores ativados');
-        } else {
-            alert('Permissão para sensores de movimento negada.');
-        }
-    }).catch(err => {
-        console.warn('Erro pedindo permissão de orientação:', err);
-        setupOrientationListener();
-        if (useAccelerometer) setupMotionListener();
-        sensorsActive = true;
-        updateUI();
-    });
-}
-
-function stopSensors() {
-    teardownOrientationListener();
-    teardownMotionListener();
-    sensorsActive = false;
-    updateUI();
-    showNotification('🔕 Sensores desativados');
 }
 
 // ===== Calibração e reset =====
@@ -790,23 +857,27 @@ document.addEventListener('DOMContentLoaded', function() {
     overlay = document.getElementById('overlay');
     accelerometerIndicator = document.getElementById('accelerometerIndicator');
 
-    // Event handlers
+    // Event handlers (garantir chamadas robustas)
     if (connectBtn) connectBtn.addEventListener('click', function(e){ e.preventDefault(); toggleWebSocket(); });
     if (sensorBtn) sensorBtn.addEventListener('click', function(e){ e.preventDefault(); toggleSensors(); });
     if (overlay) overlay.addEventListener('click', toggleConfig);
+
+    // Botão config header: garantir listener por JS (não depender só do onclick inline)
+    const cfgButtons = document.querySelectorAll('.config-header-btn');
+    cfgButtons.forEach(btn => {
+        btn.removeEventListener('click', toggleConfig);
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            toggleConfig();
+            setTimeout(initialize3DVisualizer, 300);
+        });
+    });
 
     setupEventListeners();
 
     // Inicializar visualizador 3D
     setTimeout(() => {
         initialize3DVisualizer();
-        const configButton = document.querySelector('.config-header-btn');
-        if (configButton) {
-            configButton.addEventListener('click', function() {
-                setTimeout(initialize3DVisualizer, 300);
-            });
-        }
-
         window.addEventListener('resize', function() {
             if (window.threeJSVisualizer && typeof window.threeJSVisualizer.onWindowResize === 'function') {
                 window.threeJSVisualizer.onWindowResize();
@@ -830,8 +901,8 @@ window.toggleWebSocket = function() {
     }
 };
 window.toggleSensors = function() {
-    if (!sensorsActive) startSensors();
-    else stopSensors();
+    // função global justa para o HTML; chama a versão async
+    toggleSensors().catch(err => console.warn('toggleSensors global erro:', err));
 };
 window.leftClick = leftClick;
 window.rightClick = rightClick;
