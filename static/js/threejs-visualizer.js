@@ -1,9 +1,7 @@
 // static/js/threejs-visualizer.js
-// VISUALIZADOR 3D PARA O AIMPOINTER - VERSÃO CORRIGIDA
+// VISUALIZADOR 3D PARA O AIMPOINTER - SEM ROTAÇÃO AUTOMÁTICA (ANIMAÇÃO REMOVIDA)
 
-// Pequeno placeholder / fallback para evitar erros caso outros scripts
-// leiam window.threeJSVisualizer antes da inicialização completa.
-// Isso previne acessos a propriedades de undefined.
+// Fallback mínimo para evitar erros se outros scripts acessarem antes da inicialização
 if (typeof window !== 'undefined' && !window.threeJSVisualizer) {
     window.threeJSVisualizer = {
         updateOrientation: function() {},
@@ -27,11 +25,9 @@ function initializeThreeJS() {
 
     try {
         // Limpar container existente
-        while (container.firstChild) {
-            container.removeChild(container.firstChild);
-        }
+        while (container.firstChild) container.removeChild(container.firstChild);
 
-        // Configuração da cena
+        // Cena e câmera
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
         renderer = new THREE.WebGLRenderer({
@@ -42,10 +38,10 @@ function initializeThreeJS() {
 
         renderer.setSize(container.clientWidth, container.clientHeight);
         renderer.setClearColor(0x000000, 0);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Otimização de performance
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         container.appendChild(renderer.domElement);
 
-        // Iluminação melhorada
+        // Iluminação
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
@@ -57,10 +53,9 @@ function initializeThreeJS() {
         pointLight.position.set(-5, 5, 5);
         scene.add(pointLight);
 
-        // Criar um smartphone estilizado
+        // Smartphone estilizado
         phoneGroup = new THREE.Group();
 
-        // Corpo do smartphone
         const bodyGeometry = new THREE.BoxGeometry(3, 6, 0.5);
         const bodyMaterial = new THREE.MeshPhongMaterial({
             color: 0x1a1a1a,
@@ -70,7 +65,6 @@ function initializeThreeJS() {
         const phoneBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
         phoneGroup.add(phoneBody);
 
-        // Tela com material que pode mudar de cor
         const screenGeometry = new THREE.BoxGeometry(2.8, 5.6, 0.1);
         screenMaterial = new THREE.MeshPhongMaterial({
             color: 0x000011,
@@ -83,7 +77,6 @@ function initializeThreeJS() {
         screen.position.z = 0.21;
         phoneGroup.add(screen);
 
-        // Botão de home estilizado
         const buttonGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
         const buttonMaterial = new THREE.MeshPhongMaterial({
             color: 0x333333,
@@ -95,7 +88,6 @@ function initializeThreeJS() {
         button.rotation.x = Math.PI / 2;
         phoneGroup.add(button);
 
-        // Câmera frontal
         const cameraGeometry = new THREE.CircleGeometry(0.1, 8);
         const cameraMaterial = new THREE.MeshPhongMaterial({
             color: 0x000000,
@@ -107,54 +99,48 @@ function initializeThreeJS() {
         phoneGroup.add(cameraDot);
 
         scene.add(phoneGroup);
+
+        // Posição da câmera
         camera.position.z = 12;
         camera.position.y = 2;
 
-        // Grade de referência no chão
+        // Grid opcional
         const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
         gridHelper.position.y = -5;
         scene.add(gridHelper);
 
-        // Animação suave
+        // Animação: somente render loop (sem rotação automática)
         function animate() {
             requestAnimationFrame(animate);
 
-            // Rotação suave adicional para demonstração
-            // Proteção: verificar existência antes de acessar hasRecentUpdate
-            if (!window.threeJSVisualizer || !window.threeJSVisualizer.hasRecentUpdate) {
-                if (phoneGroup) phoneGroup.rotation.y += 0.002;
-            }
-            // Apenas setar a flag se o objeto realmente existir
-            if (window.threeJSVisualizer) {
-                window.threeJSVisualizer.hasRecentUpdate = false;
-            }
+            // NÃO executar rotação automática aqui.
+            // O objeto phoneGroup será rotacionado apenas por updateOrientation()
+            // quando houver dados do sensor (evita interferir na calibração).
 
             renderer.render(scene, camera);
         }
         animate();
 
-        // Redimensionamento responsivo
+        // onWindowResize
         function onWindowResize() {
             if (!container || !camera || !renderer) return;
-
             camera.aspect = container.clientWidth / container.clientHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(container.clientWidth, container.clientHeight);
         }
-
         window.addEventListener('resize', onWindowResize);
 
-        // API pública para controle (definida aqui para estar disponível logo após inicialização)
+        // API pública
         window.threeJSVisualizer = {
             updateOrientation: function(alpha, beta, gamma) {
                 if (!phoneGroup) return;
 
-                // Converter para radianos e aplicar rotações suavizadas
+                // Converter para radianos
                 const targetX = (beta * Math.PI) / 180;
                 const targetY = (gamma * Math.PI) / 180;
                 const targetZ = (alpha * Math.PI) / 180;
 
-                // Suavização das rotações
+                // Aplicar suavização nas rotações (interpolação)
                 phoneGroup.rotation.x += (targetX - phoneGroup.rotation.x) * 0.1;
                 phoneGroup.rotation.y += (targetY - phoneGroup.rotation.y) * 0.1;
                 phoneGroup.rotation.z += (targetZ - phoneGroup.rotation.z) * 0.1;
@@ -164,15 +150,12 @@ function initializeThreeJS() {
 
             setCalibrationMode: function(active, step) {
                 if (!screenMaterial) return;
-
                 if (active) {
-                    // Modo calibração - tela vermelha pulsante
                     const intensity = 0.5 + 0.5 * Math.sin(Date.now() * 0.01);
                     screenMaterial.emissive.setHex(0xff0000);
                     screenMaterial.color.setHex(0x330000);
                     screenMaterial.emissiveIntensity = intensity;
                 } else {
-                    // Modo normal - tela azul
                     screenMaterial.emissive.setHex(0x001133);
                     screenMaterial.color.setHex(0x000011);
                     screenMaterial.emissiveIntensity = 1;
@@ -181,15 +164,10 @@ function initializeThreeJS() {
 
             onWindowResize: onWindowResize,
 
-            // Método para destruir/limpar
             dispose: function() {
                 try {
-                    if (renderer) {
-                        renderer.dispose();
-                    }
-                    if (container) {
-                        container.innerHTML = '';
-                    }
+                    if (renderer) renderer.dispose();
+                    if (container) container.innerHTML = '';
                     window.removeEventListener('resize', onWindowResize);
                 } catch (err) {
                     console.warn('Erro ao destruir visualizador Three.js:', err);
@@ -199,14 +177,14 @@ function initializeThreeJS() {
             hasRecentUpdate: false
         };
 
-        // Remover estado de loading e adicionar sucesso
+        // Remover estado de loading e marcar sucesso
         const visualizer = document.getElementById('deviceVisualizer');
         if (visualizer) {
             visualizer.classList.remove('loading', 'error');
             visualizer.classList.add('status-connected');
         }
 
-        console.log('✅ Three.js inicializado com sucesso!');
+        console.log('✅ Three.js inicializado (sem rotação automática).');
 
     } catch (error) {
         console.error('❌ Erro na inicialização do Three.js:', error);
@@ -229,18 +207,14 @@ function safeInitializeThreeJS() {
         }
         return;
     }
-
-    // Pequeno delay para garantir que o DOM esteja completamente renderizado
     setTimeout(initializeThreeJS, 100);
 }
 
-// Inicializar quando o script for carregado
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', safeInitializeThreeJS);
 } else {
     safeInitializeThreeJS();
 }
 
-// Exportar para uso global
 window.initializeThreeJS = initializeThreeJS;
 window.safeInitializeThreeJS = safeInitializeThreeJS;

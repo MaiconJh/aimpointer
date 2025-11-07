@@ -1,17 +1,14 @@
 ﻿// static/js/app.js
-// SISTEMA PRINCIPAL DO AIMPOINTER - VERSÃO COM CALIBRAÇÃO REESCRITA E MAIS ROBUSTA
+// AIMPOINTER - Arquivo completo com calibração reescrita, fusão com acelerômetro e visualizador 3D
+// Substitua o arquivo existente por este conteúdo.
 
-// ===== UTILITÁRIAS PARA ÂNGULOS =====
+// ===== UTILITÁRIAS =====
 function normalizeAngle(angle) {
-    // Normaliza qualquer ângulo para [0, 360)
     let a = angle % 360;
     if (a < 0) a += 360;
     return a;
 }
-
 function angleDiff(a, b) {
-    // Retorna a menor diferença assinada entre a e b em graus no intervalo (-180, 180]
-    // funciona para ângulos em 0..360 ou -180..180
     const na = normalizeAngle(a);
     const nb = normalizeAngle(b);
     let diff = na - nb;
@@ -19,77 +16,15 @@ function angleDiff(a, b) {
     if (diff <= -180) diff += 360;
     return diff;
 }
+function lerp(a, b, t) { return a + (b - a) * t; }
 
-// ===== INICIALIZAÇÃO DO VISUALIZADOR 3D =====
+// ===== VISUALIZADOR 3D - invocado da threejs-visualizer.js =====
 function initialize3DVisualizer() {
-    console.log('🎯 Inicializando visualizador 3D...');
-
-    const visualizerContainer = document.getElementById('deviceVisualizer');
-    const threejsContainer = document.getElementById('threejs-container');
-
-    if (!visualizerContainer || !threejsContainer) {
-        console.error('❌ Containers do visualizador 3D não encontrados!');
-        return;
+    if (typeof safeInitializeThreeJS === 'function') {
+        safeInitializeThreeJS();
+    } else {
+        console.warn('safeInitializeThreeJS não disponível - verifique threejs-visualizer.js');
     }
-
-    // Adicionar classe de loading
-    visualizerContainer.classList.add('loading');
-
-    // Verificar se Three.js está disponível
-    if (typeof THREE === 'undefined') {
-        console.error('❌ Three.js não foi carregado!');
-        visualizerContainer.classList.remove('loading');
-        visualizerContainer.classList.add('error');
-        return;
-    }
-
-    // Pequeno delay para garantir que o DOM esteja pronto
-    setTimeout(() => {
-        try {
-            if (typeof safeInitializeThreeJS === 'function') {
-                safeInitializeThreeJS();
-            } else if (window.threeJSVisualizer) {
-                visualizerContainer.classList.remove('loading');
-                console.log('✅ Visualizador 3D já inicializado');
-            } else {
-                console.error('❌ Função safeInitializeThreeJS não encontrada!');
-                visualizerContainer.classList.remove('loading');
-                visualizerContainer.classList.add('error');
-            }
-        } catch (error) {
-            console.error('❌ Erro ao inicializar visualizador 3D:', error);
-            visualizerContainer.classList.remove('loading');
-            visualizerContainer.classList.add('error');
-        }
-    }, 500);
-}
-
-// ===== DIAGNÓSTICO DO VISUALIZADOR 3D =====
-function diagnose3DProblem() {
-    console.log('=== 🔍 DIAGNÓSTICO DO VISUALIZADOR 3D ===');
-
-    const elements = {
-        'deviceVisualizer': document.getElementById('deviceVisualizer'),
-        'threejs-container': document.getElementById('threejs-container'),
-        'orientationIndicator': document.getElementById('orientationIndicator')
-    };
-
-    for (const [name, element] of Object.entries(elements)) {
-        if (element) {
-            console.log(`✅ ${name}: encontrado`, element);
-            console.log(`   - Display: ${window.getComputedStyle(element).display}`);
-            console.log(`   - Visibility: ${window.getComputedStyle(element).visibility}`);
-            console.log(`   - Opacity: ${window.getComputedStyle(element).opacity}`);
-            console.log(`   - Width: ${element.offsetWidth}px, Height: ${element.offsetHeight}px`);
-        } else {
-            console.error(`❌ ${name}: NÃO encontrado`);
-        }
-    }
-
-    console.log('Three.js disponível:', typeof THREE !== 'undefined');
-    console.log('Visualizador global:', window.threeJSVisualizer);
-    console.log('Função initializeThreeJS:', typeof initializeThreeJS);
-    console.log('Função safeInitializeThreeJS:', typeof safeInitializeThreeJS);
 }
 
 // ===== SISTEMA DE CALIBRAÇÃO (REESCRITO) =====
@@ -104,9 +39,8 @@ class PositionBasedCalibrationSystem {
             { id: 3, title: "Giro 90° Direita", targetOffset: { gamma: 90, beta: 0, alpha: 0 }, tolerance: 25, completed: false },
             { id: 4, title: "Voltar para Inicial", targetOffset: { gamma: 0, beta: 0, alpha: 0 }, tolerance: 15, completed: false }
         ];
-        // baseline guarda a orientação de referência (gamma,beta,alpha)
-        this.baseline = null;
-        this.samplesWindowMs = 1000; // janela para média de amostras na definição
+        this.baseline = null; // { gamma, beta, alpha }
+        this.samplesWindowMs = 1000;
     }
 
     startCalibration() {
@@ -121,12 +55,11 @@ class PositionBasedCalibrationSystem {
     addCalibrationSample(gamma, beta, alpha) {
         if (!this.isCalibrating) return;
         this.initialSamples.push({ gamma, beta, alpha, t: Date.now(), step: this.currentStep + 1 });
-        // mantém a janela temporal
         const cutoff = Date.now() - this.samplesWindowMs;
         this.initialSamples = this.initialSamples.filter(s => s.t >= cutoff);
     }
 
-    getAverageRecentSamples(stepId=1) {
+    getAverageRecentSamples(stepId = 1) {
         const cutoff = Date.now() - this.samplesWindowMs;
         const samples = this.initialSamples.filter(s => s.t >= cutoff && s.step === stepId);
         if (!samples.length) return null;
@@ -143,16 +76,13 @@ class PositionBasedCalibrationSystem {
         const step = this.calibrationSteps[this.currentStep];
         if (!step) return;
 
-        // Passo inicial: definimos baseline como média das amostras recentes
         if (step.isInitialStep) {
             const avg = this.getAverageRecentSamples(1);
             if (avg) {
                 this.baseline = { gamma: avg.gamma, beta: avg.beta, alpha: avg.alpha };
                 this.calibrationSteps[this.currentStep].completed = true;
-                // aplicar baseline no sistema principal
                 pointerSystem.calibration = { x: this.baseline.gamma, y: this.baseline.beta, z: this.baseline.alpha };
                 pointerSystem.resetFilter();
-                // enviar ao servidor
                 if (window.socket && window.socket.readyState === WebSocket.OPEN) {
                     window.socket.send(JSON.stringify({ type: 'calibrate', orientation: pointerSystem.calibration }));
                 }
@@ -165,10 +95,14 @@ class PositionBasedCalibrationSystem {
             return;
         }
 
-        // Para passos seguintes apenas validamos alinhamento com target (feedback)
         const recent = this.getAverageRecentSamples(this.currentStep + 1);
         if (!recent) {
             showNotification('⚠️ Não há amostras suficientes para este passo. Mova até o alvo e confirme.');
+            return;
+        }
+
+        if (!this.baseline) {
+            showNotification('⚠️ Baseline não definida. Confirme o passo 1 primeiro.');
             return;
         }
 
@@ -198,7 +132,6 @@ class PositionBasedCalibrationSystem {
     finishCalibration() {
         this.isCalibrating = false;
         if (window.threeJSVisualizer) window.threeJSVisualizer.setCalibrationMode(false);
-        // já definimos baseline no passo 1; aqui apenas damos feedback
         this.updateUI();
         showNotification('🎉 Calibração concluída. Baseline aplicada.');
     }
@@ -265,7 +198,6 @@ class PositionBasedCalibrationSystem {
             if (currentStep && this.isCalibrating) {
                 window.threeJSVisualizer.setCalibrationMode(true, this.currentStep);
                 dv.classList.add('calibration-active', 'calibration-pulse');
-                // verificar alinhamento para feedback visual
                 const target = currentStep.isInitialStep ? null : {
                     gamma: this.baseline ? this.baseline.gamma + (currentStep.targetOffset?.gamma || 0) : null,
                     beta: this.baseline ? this.baseline.beta + (currentStep.targetOffset?.beta || 0) : null,
@@ -299,10 +231,9 @@ class PositionBasedCalibrationSystem {
 class AdvancedPointerSystem {
     constructor() {
         this.pointerSensitivity = 60; // graus que cobrem a tela inteira
-        this.smoothingFactor = 0.75; // como 0..1 (quanto maior, mais suave)
+        this.smoothingFactor = 0.75; // 0..1 (quanto maior, mais suave)
         this.compensation = 2;
         this.sensorFusion = true;
-        // calibration agora guarda baseline: { x: gamma, y: beta, z: alpha }
         this.calibration = { x: 0, y: 0, z: 0 };
         this.screenWidth = 1920;
         this.screenHeight = 1080;
@@ -379,64 +310,58 @@ class AdvancedPointerSystem {
         this.saveSettings();
     }
 
-    // Função central: converte orientação direta do dispositivo para posição absoluta
+    startAdvancedCalibration() {
+        this.calibrationSystem.startCalibration();
+    }
+
+    confirmStep(stepNumber) {
+        this.calibrationSystem.confirmCurrentStep();
+    }
+
+    // Função central: converte orientação do dispositivo para posição absoluta
     calculateAbsolutePosition(gamma, beta, alpha) {
-        // Se não houver baseline definida, usar current como baseline (ou manter zero)
         const baselineGamma = (this.calibration && typeof this.calibration.x === 'number') ? this.calibration.x : 0;
         const baselineBeta = (this.calibration && typeof this.calibration.y === 'number') ? this.calibration.y : 0;
         const baselineAlpha = (this.calibration && typeof this.calibration.z === 'number') ? this.calibration.z : 0;
 
-        // Atualiza visualizador e coleta amostras de calibração se necessário
         this.calibrationSystem.updateDeviceVisualization(gamma, beta, alpha);
         if (this.calibrationSystem.isCalibrating) {
             this.calibrationSystem.addCalibrationSample(gamma, beta, alpha);
         }
 
-        // Delta angular (diferença mínima assinada)
-        const deltaGamma = angleDiff(gamma, baselineGamma); // left-right
-        const deltaBeta = angleDiff(beta, baselineBeta);    // front-back
-        const deltaAlpha = angleDiff(alpha, baselineAlpha); // rotation
+        const deltaGamma = angleDiff(gamma, baselineGamma);
+        const deltaBeta = angleDiff(beta, baselineBeta);
+        const deltaAlpha = angleDiff(alpha, baselineAlpha);
 
-        // Limitar os deltas para evitar números extremos
-        // Assumimos que gamma normalmente está dentro de [-90, 90] e beta [-180,180]
         const maxGamma = 90;
         const maxBeta = 180;
         const clampedGamma = Math.max(-maxGamma, Math.min(maxGamma, deltaGamma));
         const clampedBeta = Math.max(-maxBeta, Math.min(maxBeta, deltaBeta));
 
-        // Mapear ângulos para posições relativas:
-        // pointerSensitivity define quantos graus cobrem a tela inteira.
-        // Portanto metade da sensibilidade corresponde a deslocamento até a borda.
         const halfSens = this.pointerSensitivity / 2;
-        let relX = clampedGamma / halfSens; // -1 .. 1 (aprox)
-        let relY = -clampedBeta / halfSens; // invertido para que inclinar pra frente diminua Y, por exemplo
+        let relX = clampedGamma / halfSens;
+        let relY = -clampedBeta / halfSens;
 
-        // Se sensor fusion ativo, aplicar rotação por alpha (compensação)
         if (this.sensorFusion) {
             const radA = (deltaAlpha) * Math.PI / 180;
             const cosA = Math.cos(radA);
             const sinA = Math.sin(radA);
-            const compFactor = 1 + (this.compensation * 0.05); // leve ajuste
-            // rotaciona o vetor (relX, relY)
+            const compFactor = 1 + (this.compensation * 0.05);
             const rx = relX * cosA - relY * sinA;
             const ry = relX * sinA + relY * cosA;
             relX = rx * compFactor;
             relY = ry * compFactor;
         }
 
-        // Clamp final dos relativos para evitar extrapolação
         relX = Math.max(-1, Math.min(1, relX));
         relY = Math.max(-1, Math.min(1, relY));
 
-        // Converte para absolute screen coords
         let absX = (relX * (this.screenWidth / 2)) + (this.screenWidth / 2);
         let absY = (relY * (this.screenHeight / 2)) + (this.screenHeight / 2);
 
-        // Aplicar suavização (filtro exponencial simples)
         this.filteredPosition.x = this.smoothingFactor * this.filteredPosition.x + (1 - this.smoothingFactor) * absX;
         this.filteredPosition.y = this.smoothingFactor * this.filteredPosition.y + (1 - this.smoothingFactor) * absY;
 
-        // Garantir dentro de tela
         this.filteredPosition.x = Math.max(0, Math.min(this.screenWidth - 1, this.filteredPosition.x));
         this.filteredPosition.y = Math.max(0, Math.min(this.screenHeight - 1, this.filteredPosition.y));
 
@@ -459,14 +384,6 @@ class AdvancedPointerSystem {
         const stability = Math.abs(gamma) + Math.abs(beta);
         return Math.max(0, 100 - Math.min(stability, 50));
     }
-
-    startAdvancedCalibration() {
-        this.calibrationSystem.startCalibration();
-    }
-
-    confirmStep(stepNumber) {
-        this.calibrationSystem.confirmCurrentStep();
-    }
 }
 
 // ===== VARIÁVEIS GLOBAIS =====
@@ -476,17 +393,47 @@ let sensorsActive = false;
 let lastSendTime = 0;
 const SEND_INTERVAL = 16;
 
-// Elementos da UI
-const statusDot = document.getElementById('statusDot');
-const statusText = document.getElementById('statusText');
-const crosshair = document.getElementById('crosshair');
-const connectBtn = document.getElementById('connectBtn');
-const sensorBtn = document.getElementById('sensorBtn');
-const configPanel = document.getElementById('configPanel');
-const overlay = document.getElementById('overlay');
+// ACELERÔMETRO / FUSÃO
+let useAccelerometer = true;
+let accelAvailable = false;
+let lastAccel = { x: 0, y: 0, z: 0 };
+let accelStable = false;
+const GRAVITY = 9.81;
+const ACCEL_STABLE_TOL = 1.6; // m/s^2
+const ACCEL_TRUST_STABLE = 0.7;
+const ACCEL_TRUST_MOVING = 0.2;
 
-// ===== FUNÇÕES DE CONTROLE DA UI =====
+// Elementos da UI (serão buscados no DOMContentLoaded para serem seguros)
+let statusDot, statusText, crosshair, connectBtn, sensorBtn, configPanel, overlay, accelerometerIndicator;
+
+// ===== FUNÇÕES AUXILIARES E UI =====
+function showNotification(message) {
+    console.log('💬 ' + message);
+    const notification = document.createElement('div');
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--primary);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        z-index: 10000;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+    document.body.appendChild(notification);
+    setTimeout(() => {
+        if (notification.parentNode) notification.parentNode.removeChild(notification);
+    }, 3000);
+}
+
 function updateUI() {
+    if (!statusDot || !statusText || !connectBtn || !sensorBtn) return;
+
     if (socket && socket.readyState === WebSocket.OPEN) {
         statusDot.className = sensorsActive ? 'status-dot sensors-active' : 'status-dot connected';
         statusText.textContent = sensorsActive ? 'Ativo' : 'Conectado';
@@ -499,8 +446,7 @@ function updateUI() {
         connectBtn.classList.remove('connected');
     }
 
-    sensorBtn.textContent = sensorsActive ?
-        'Desativar Sensores' : 'Ativar Sensores';
+    sensorBtn.textContent = sensorsActive ? 'Desativar Sensores' : 'Ativar Sensores';
     sensorBtn.classList.toggle('active', sensorsActive);
 
     const thisDeviceDot = document.getElementById('thisDeviceDot');
@@ -511,23 +457,18 @@ function updateUI() {
 }
 
 function toggleConfig() {
+    if (!configPanel || !overlay) return;
     configPanel.classList.toggle('open');
     overlay.classList.toggle('active');
 }
 
-function toggleWebSocket() {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.close();
-        sensorsActive = false;
-        updateUI();
-    } else {
-        connectWebSocket();
-    }
-}
-
+// ===== WebSocket =====
 function connectWebSocket() {
-    const ip = document.getElementById('serverIp').value.trim();
+    const ipInput = document.getElementById('serverIp');
+    if (!ipInput) return alert('Campo IP do servidor não encontrado');
+    const ip = ipInput.value.trim();
     if (!ip) return alert('Digite o IP do servidor!');
+
     const wsUrl = `wss://${ip}:8765`;
 
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -540,6 +481,7 @@ function connectWebSocket() {
     socket.onopen = () => {
         console.log('✅ WebSocket conectado com sucesso');
         updateUI();
+        showNotification('🔗 Conectado ao servidor');
     };
 
     socket.onmessage = (e) => {
@@ -547,7 +489,6 @@ function connectWebSocket() {
             const data = JSON.parse(e.data);
             if (data.calibration) {
                 pointerSystem.calibration = data.calibration;
-                // também atualizar baseline na sub-sistema de calibração
                 if (pointerSystem.calibrationSystem) {
                     pointerSystem.calibrationSystem.baseline = {
                         gamma: data.calibration.x,
@@ -565,7 +506,7 @@ function connectWebSocket() {
 
             updateUI();
         } catch (err) {
-            console.error('Erro ao processar mensagem:', err);
+            console.error('Erro ao processar mensagem WS:', err);
         }
     };
 
@@ -573,58 +514,73 @@ function connectWebSocket() {
         console.log('WebSocket desconectado');
         sensorsActive = false;
         updateUI();
+        showNotification('🔌 WebSocket desconectado');
     };
 
     socket.onerror = (error) => {
         console.error('Erro WebSocket:', error);
-        alert('Erro ao conectar com o servidor. Verifique o IP e se o servidor está rodando.');
+        showNotification('❌ Erro ao conectar com o servidor. Verifique o IP e se o servidor está rodando.');
     };
 }
 
-function toggleSensors() {
-    if (!sensorsActive) startSensors();
-    else stopSensors();
-}
-
-function startSensors() {
-    if (typeof DeviceOrientationEvent === 'undefined') {
-        alert('Seu navegador não suporta a API de orientação do dispositivo.');
-        return;
-    }
-
-    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission()
-            .then(permissionState => {
-                if (permissionState === 'granted') {
-                    setupOrientationListener();
-                    sensorsActive = true;
-                    updateUI();
-                } else {
-                    alert('Permissão para sensores de movimento negada.');
-                }
-            })
-            .catch(console.error);
-    } else {
-        setupOrientationListener();
-        sensorsActive = true;
-        updateUI();
-    }
-}
-
-function stopSensors() {
-    window.removeEventListener('deviceorientation', handleOrientation);
-    sensorsActive = false;
-    updateUI();
-}
-
+// ===== SENSORES: Orientation + Motion (Acelerômetro) =====
 function setupOrientationListener() {
-    window.addEventListener('deviceorientation', handleOrientation);
+    window.addEventListener('deviceorientation', handleOrientation, { passive: true });
+}
+
+function teardownOrientationListener() {
+    window.removeEventListener('deviceorientation', handleOrientation);
+}
+
+function setupMotionListener() {
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        // iOS
+        DeviceMotionEvent.requestPermission().catch(() => {}).then(res => {
+            // ignorar resultado - alguns browsers não retornam
+            window.addEventListener('devicemotion', handleMotion, { passive: true });
+        });
+    } else {
+        window.addEventListener('devicemotion', handleMotion, { passive: true });
+    }
+}
+
+function teardownMotionListener() {
+    window.removeEventListener('devicemotion', handleMotion);
+}
+
+function handleMotion(ev) {
+    const acc = ev.accelerationIncludingGravity || ev.acceleration || { x: 0, y: 0, z: 0 };
+    const ax = acc.x || 0, ay = acc.y || 0, az = acc.z || 0;
+    accelAvailable = true;
+    lastAccel = { x: ax, y: ay, z: az };
+
+    const mag = Math.sqrt(ax*ax + ay*ay + az*az);
+    accelStable = Math.abs(mag - GRAVITY) < ACCEL_STABLE_TOL;
+
+    if (accelerometerIndicator) {
+        accelerometerIndicator.textContent = `Accel X:${ax.toFixed(2)} Y:${ay.toFixed(2)} Z:${az.toFixed(2)}`;
+    }
+}
+
+function accelToAngles(ax, ay, az) {
+    const roll = Math.atan2(ay, az) * 180 / Math.PI;
+    const pitch = Math.atan2(-ax, Math.sqrt(ay*ay + az*az)) * 180 / Math.PI;
+    return { gamma: roll, beta: pitch };
 }
 
 function handleOrientation(event) {
-    const gamma = (typeof event.gamma === 'number') ? event.gamma : 0;
-    const beta = (typeof event.beta === 'number') ? event.beta : 0;
-    const alpha = (typeof event.alpha === 'number') ? event.alpha : 0;
+    let gamma = (typeof event.gamma === 'number') ? event.gamma : 0;
+    let beta = (typeof event.beta === 'number') ? event.beta : 0;
+    let alpha = (typeof event.alpha === 'number') ? event.alpha : 0;
+
+    if (useAccelerometer && accelAvailable) {
+        const a = accelToAngles(lastAccel.x, lastAccel.y, lastAccel.z);
+        const trust = accelStable ? ACCEL_TRUST_STABLE : ACCEL_TRUST_MOVING;
+        const fusedGamma = lerp(gamma, a.gamma, trust);
+        const fusedBeta = lerp(beta, a.beta, trust);
+        gamma = fusedGamma;
+        beta = fusedBeta;
+    }
 
     updateSensorData(gamma, beta, alpha);
 
@@ -645,6 +601,7 @@ function handleOrientation(event) {
     }
 }
 
+// ===== UI Helpers =====
 function updateSensorData(gamma, beta, alpha) {
     const directionX = document.getElementById('directionX');
     const directionY = document.getElementById('directionY');
@@ -690,6 +647,48 @@ function rightClick() {
     }
 }
 
+// ===== Controles de sensores =====
+function startSensors() {
+    if (typeof DeviceOrientationEvent === 'undefined') {
+        alert('Seu navegador não suporta a API de orientação do dispositivo.');
+        return;
+    }
+
+    const requestOrientationPermission = () => {
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            return DeviceOrientationEvent.requestPermission().catch(() => {}).then(p => p);
+        }
+        return Promise.resolve('granted');
+    };
+
+    requestOrientationPermission().then(permissionState => {
+        if (permissionState === 'granted' || permissionState === undefined) {
+            setupOrientationListener();
+            if (useAccelerometer) setupMotionListener();
+            sensorsActive = true;
+            updateUI();
+            showNotification('📡 Sensores ativados');
+        } else {
+            alert('Permissão para sensores de movimento negada.');
+        }
+    }).catch(err => {
+        console.warn('Erro pedindo permissão de orientação:', err);
+        setupOrientationListener();
+        if (useAccelerometer) setupMotionListener();
+        sensorsActive = true;
+        updateUI();
+    });
+}
+
+function stopSensors() {
+    teardownOrientationListener();
+    teardownMotionListener();
+    sensorsActive = false;
+    updateUI();
+    showNotification('🔕 Sensores desativados');
+}
+
+// ===== Calibração e reset =====
 function startAdvancedCalibration() {
     pointerSystem.startAdvancedCalibration();
 }
@@ -702,19 +701,17 @@ function resetCalibration() {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'reset_calibration' }));
     }
-
     pointerSystem.calibration = { x: 0, y: 0, z: 0 };
     pointerSystem.calibrationSystem.baseline = null;
     pointerSystem.calibrationSystem.isCalibrating = false;
     pointerSystem.calibrationSystem.currentStep = 0;
     pointerSystem.calibrationSystem.calibrationSteps.forEach(step => step.completed = false);
     pointerSystem.calibrationSystem.updateUI();
-
     if (window.threeJSVisualizer) window.threeJSVisualizer.setCalibrationMode(false);
     showNotification('🔃 Calibração resetada!');
 }
 
-// ===== CONFIGURAÇÕES DE CONTROLE =====
+// ===== Event listeners de UI =====
 function setupEventListeners() {
     const sensitivitySlider = document.getElementById('sensitivity');
     if (sensitivitySlider) {
@@ -753,50 +750,47 @@ function setupEventListeners() {
             pointerSystem.saveSettings();
         });
     }
+
+    const useAccelToggle = document.getElementById('useAccelerometerToggle');
+    if (useAccelToggle) {
+        useAccelToggle.checked = useAccelerometer;
+        useAccelToggle.addEventListener('change', function() {
+            useAccelerometer = this.checked;
+            if (useAccelerometer && sensorsActive) setupMotionListener();
+            if (!useAccelerometer) teardownMotionListener();
+        });
+    }
 }
 
-// ===== FUNÇÕES AUXILIARES =====
-function showNotification(message) {
-    console.log('💬 ' + message);
-    const notification = document.createElement('div');
-    notification.textContent = message;
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: var(--primary);
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        z-index: 10000;
-        font-size: 14px;
-        font-weight: 500;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    `;
-    document.body.appendChild(notification);
-    setTimeout(() => {
-        if (notification.parentNode) notification.parentNode.removeChild(notification);
-    }, 3000);
-}
-
-// ===== INICIALIZAÇÃO PRINCIPAL =====
+// ===== Inicialização principal =====
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🎯 DOM carregado, inicializando AimPointer...');
 
+    // Capturar elementos da UI
+    statusDot = document.getElementById('statusDot');
+    statusText = document.getElementById('statusText');
+    crosshair = document.getElementById('crosshair');
+    connectBtn = document.getElementById('connectBtn');
+    sensorBtn = document.getElementById('sensorBtn');
+    configPanel = document.getElementById('configPanel');
+    overlay = document.getElementById('overlay');
+    accelerometerIndicator = document.getElementById('accelerometerIndicator');
+
+    // Eventos de botões que o HTML chama via onclick apontam para funções globais;
+    // garantir que existam handlers também via JS quando aplicável
+    if (connectBtn) connectBtn.addEventListener('click', toggleWebSocket);
+    if (sensorBtn) sensorBtn.addEventListener('click', toggleSensors);
+    if (overlay) overlay.addEventListener('click', toggleConfig);
+
     setupEventListeners();
 
+    // Inicializar visualizador 3D
     setTimeout(() => {
         initialize3DVisualizer();
-
         const configButton = document.querySelector('.config-header-btn');
         if (configButton) {
             configButton.addEventListener('click', function() {
-                console.log('⚙️ Painel de configurações aberto - reinicializando visualizador 3D');
                 setTimeout(initialize3DVisualizer, 300);
-                setTimeout(() => {
-                    if (window.event && window.event.shiftKey) diagnose3DProblem();
-                }, 500);
             });
         }
 
@@ -805,17 +799,35 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.threeJSVisualizer.onWindowResize();
             }
         });
-    }, 1000);
+    }, 500);
+
+    updateUI();
+    console.log('✅ AimPointer carregado com sucesso!');
 });
 
+// Tornar funções globais para acesso via HTML
 window.toggleConfig = toggleConfig;
-window.toggleWebSocket = toggleWebSocket;
-window.toggleSensors = toggleSensors;
+window.toggleWebSocket = function() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+        sensorsActive = false;
+        updateUI();
+    } else {
+        connectWebSocket();
+    }
+};
+window.toggleSensors = function() {
+    if (!sensorsActive) startSensors();
+    else stopSensors();
+};
 window.leftClick = leftClick;
 window.rightClick = rightClick;
-window.startAdvancedCalibration = startAdvancedCalibration;
-window.confirmStep = confirmStep;
+window.startAdvancedCalibration = function() { pointerSystem.startAdvancedCalibration(); };
+window.confirmStep = function(step) { pointerSystem.confirmStep(step); };
 window.resetCalibration = resetCalibration;
-window.diagnose3DProblem = diagnose3DProblem;
-
-console.log('✅ AimPointer carregado com sucesso!');
+window.diagnose3DProblem = function() {
+    console.log('Diagnóstico: elementos e estado:');
+    console.log('threeJSVisualizer:', window.threeJSVisualizer);
+    console.log('accelAvailable:', accelAvailable, 'accelStable:', accelStable, 'lastAccel:', lastAccel);
+    console.log('pointerSystem.calibrationSystem.baseline:', pointerSystem.calibrationSystem.baseline);
+};

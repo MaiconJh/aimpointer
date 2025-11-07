@@ -103,6 +103,15 @@
                 <button class="action-btn" onclick="toggleSensors()" id="sensorBtn">
                     Ativar Sensores
                 </button>
+
+                <!-- Novo toggle: usar acelerômetro para estabilização -->
+                <div class="toggle-container" style="margin-top:0.75rem;">
+                    <span class="toggle-label">Usar Acelerômetro (estabilização)</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="useAccelerometerToggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
                 
                 <div class="sensor-data">
                     <div class="data-item">
@@ -151,6 +160,11 @@
                     <div id="threejs-container"></div>
                     <div class="orientation-indicator" id="orientationIndicator">
                         X:0° Y:0° Z:0°
+                    </div>
+
+                    <!-- Nova caixa do acelerômetro -->
+                    <div class="accelerometer-indicator" id="accelerometerIndicator">
+                        Accel X:0.00 Y:0.00 Z:0.00
                     </div>
                 </div>
                 
