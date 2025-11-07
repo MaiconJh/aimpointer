@@ -18,8 +18,7 @@ function angleDiff(a, b) {
 }
 function lerp(a, b, t) { return a + (b - a) * t; }
 
-// ===== toggleConfig robusto (função global usada pelo onclick inline) =====
-// Substitua/cole isto no lugar da função toggleConfig atual (app.js)
+// ===== toggleConfig robusto (função global usada pelo HTML) =====
 function toggleConfig() {
     const panel = document.getElementById('configPanel');
     const ov = document.getElementById('overlay');
@@ -433,7 +432,7 @@ const ACCEL_TRUST_STABLE = 0.7;
 const ACCEL_TRUST_MOVING = 0.2;
 
 // Elementos da UI (serão buscados no DOMContentLoaded)
-let statusDot, statusText, crosshair, connectBtn, sensorBtn, configPanel, overlay, accelerometerIndicator;
+let statusDot, statusText, crosshair, connectBtnEl, sensorBtnEl, configPanelEl, overlayEl, accelerometerIndicator;
 
 // ===== FUNÇÕES AUXILIARES E UI =====
 function showNotification(message) {
@@ -461,22 +460,22 @@ function showNotification(message) {
 }
 
 function updateUI() {
-    if (!statusDot || !statusText || !connectBtn || !sensorBtn) return;
+    if (!statusDot || !statusText || !connectBtnEl || !sensorBtnEl) return;
 
     if (socket && socket.readyState === WebSocket.OPEN) {
         statusDot.className = sensorsActive ? 'status-dot sensors-active' : 'status-dot connected';
         statusText.textContent = sensorsActive ? 'Ativo' : 'Conectado';
-        connectBtn.textContent = 'Desconectar WebSocket';
-        connectBtn.classList.add('connected');
+        connectBtnEl.textContent = 'Desconectar WebSocket';
+        connectBtnEl.classList.add('connected');
     } else {
         statusDot.className = 'status-dot';
         statusText.textContent = 'Desconectado';
-        connectBtn.textContent = 'Conectar WebSocket';
-        connectBtn.classList.remove('connected');
+        connectBtnEl.textContent = 'Conectar WebSocket';
+        connectBtnEl.classList.remove('connected');
     }
 
-    sensorBtn.textContent = sensorsActive ? 'Desativar Sensores' : 'Ativar Sensores';
-    sensorBtn.classList.toggle('active', sensorsActive);
+    sensorBtnEl.textContent = sensorsActive ? 'Desativar Sensores' : 'Ativar Sensores';
+    sensorBtnEl.classList.toggle('active', sensorsActive);
 
     const thisDeviceDot = document.getElementById('thisDeviceDot');
     if (thisDeviceDot) {
@@ -649,19 +648,19 @@ function handleOrientation(event) {
 }
 
 // ===== Controles de sensores (assíncronos e robustos) =====
-async function toggleSensors() {
+async function toggleSensorsAsync() {
     try {
         if (!sensorsActive) {
-            await startSensors();
+            await startSensorsAsync();
         } else {
             stopSensors();
         }
     } catch (err) {
-        console.error('toggleSensors:', err);
+        console.error('toggleSensorsAsync:', err);
     }
 }
 
-async function startSensors() {
+async function startSensorsAsync() {
     if (typeof DeviceOrientationEvent === 'undefined') {
         showNotification('⚠️ Seu navegador NÃO suporta DeviceOrientation.');
         throw new Error('DeviceOrientationEvent not supported');
@@ -709,11 +708,11 @@ async function startSensors() {
         sensorsActive = true;
         updateUI();
         showNotification('📡 Sensores ativados');
-        console.log('startSensors: sensores ativados (orientationListenerAdded=', _orientationListenerAdded, ', motionListenerAdded=', _motionListenerAdded, ')');
+        console.log('startSensorsAsync: sensores ativados (orientationListenerAdded=', _orientationListenerAdded, ', motionListenerAdded=', _motionListenerAdded, ')');
     } catch (err) {
         sensorsActive = false;
         updateUI();
-        console.error('startSensors falhou:', err);
+        console.error('startSensorsAsync falhou:', err);
         throw err;
     }
 }
@@ -849,32 +848,60 @@ function setupEventListeners() {
 
 // ===== Inicialização principal =====
 document.addEventListener('DOMContentLoaded', function() {
-    // garantir listeners nos botões header (não depender apenas de onclick inline)
+    console.log('🎯 DOM carregado, inicializando AimPointer...');
+
+    // Capturar elementos da UI
+    statusDot = document.getElementById('statusDot');
+    statusText = document.getElementById('statusText');
+    crosshair = document.getElementById('crosshair');
+    connectBtnEl = document.getElementById('connectBtn');
+    sensorBtnEl = document.getElementById('sensorBtn');
+    configPanelEl = document.getElementById('configPanel');
+    overlayEl = document.getElementById('overlay');
+    accelerometerIndicator = document.getElementById('accelerometerIndicator');
+
+    // Event handlers (garantir chamadas robustas)
+    if (connectBtnEl) connectBtnEl.addEventListener('click', function(e){ e.preventDefault(); toggleWebSocket(); });
+    if (sensorBtnEl) sensorBtnEl.addEventListener('click', function(e){ e.preventDefault(); window.toggleSensors(); });
+
+    // overlay click handled by inline onclick in index.html as fallback; also attach here
+    if (overlayEl) {
+        overlayEl.removeEventListener('click', toggleConfig);
+        overlayEl.addEventListener('click', toggleConfig);
+    }
+
+    // Botão config header: garantir listener por JS (não depender só do onclick inline)
     const cfgButtons = document.querySelectorAll('.config-header-btn');
     cfgButtons.forEach(btn => {
-        // remove listener duplicado e adiciona um novo, seguro
         btn.removeEventListener('click', toggleConfig);
         btn.addEventListener('click', function (e) {
             e.preventDefault();
             toggleConfig();
-            // re-inicializar visualizador com pequena espera (opcional)
-            setTimeout(() => { if (typeof initialize3DVisualizer === 'function') initialize3DVisualizer(); }, 250);
+            setTimeout(initialize3DVisualizer, 300);
         });
     });
 
-    // overlay
-    const overlayElem = document.getElementById('overlay');
-    if (overlayElem) {
-        overlayElem.removeEventListener('click', toggleConfig);
-        overlayElem.addEventListener('click', toggleConfig);
-    }
-
-    // close button (X)
+    // close-config button
     const closeBtn = document.querySelector('.close-config');
     if (closeBtn) {
         closeBtn.removeEventListener('click', toggleConfig);
         closeBtn.addEventListener('click', toggleConfig);
     }
+
+    setupEventListeners();
+
+    // Inicializar visualizador 3D
+    setTimeout(() => {
+        initialize3DVisualizer();
+        window.addEventListener('resize', function() {
+            if (window.threeJSVisualizer && typeof window.threeJSVisualizer.onWindowResize === 'function') {
+                window.threeJSVisualizer.onWindowResize();
+            }
+        });
+    }, 500);
+
+    updateUI();
+    console.log('✅ AimPointer carregado com sucesso!');
 });
 
 // Tornar funções globais para acesso via HTML
@@ -888,9 +915,9 @@ window.toggleWebSocket = function() {
         connectWebSocket();
     }
 };
+// wrapper global chama a versão async segura
 window.toggleSensors = function() {
-    // função global justa para o HTML; chama a versão async
-    toggleSensors().catch(err => console.warn('toggleSensors global erro:', err));
+    toggleSensorsAsync().catch(err => console.warn('toggleSensors global erro:', err));
 };
 window.leftClick = leftClick;
 window.rightClick = rightClick;
