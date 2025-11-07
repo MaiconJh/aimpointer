@@ -1,244 +1,229 @@
 // static/js/threejs-visualizer.js
+// VISUALIZADOR 3D PARA O AIMPOINTER - VERSÃO CORRIGIDA
 
-class ThreeJSVisualizer {
-    constructor() {
-        this.scene = null;
-        this.camera = null;
-        this.renderer = null;
-        this.phone = null;
-        this.screen = null;
-        
-        // Valores atuais de orientação
-        this.alpha = 0;
-        this.beta = 0;
-        this.gamma = 0;
-        
-        // Valores suavizados
-        this.smoothAlpha = 0;
-        this.smoothBeta = 0;
-        this.smoothGamma = 0;
-        
-        this.isCalibrating = false;
-        this.calibrationStep = 0;
-        
-        this.init();
+let scene, camera, renderer, phoneGroup, screenMaterial;
+
+function initializeThreeJS() {
+    console.log('🚀 Inicializando Three.js...');
+    
+    const container = document.getElementById('threejs-container');
+    if (!container) {
+        console.error('❌ Container do Three.js não encontrado!');
+        return;
     }
 
-    init() {
-        const container = document.getElementById('threejs-container');
-        if (!container) return;
-
+    try {
         // Limpar container existente
-        container.innerHTML = '';
+        while (container.firstChild) {
+            container.removeChild(container.firstChild);
+        }
 
-        // Cena
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x1e293b);
+        // Configuração da cena
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ 
+            antialias: true, 
+            alpha: true,
+            powerPreference: "high-performance"
+        });
+        
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setClearColor(0x000000, 0);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Otimização de performance
+        container.appendChild(renderer.domElement);
 
-        // Câmera
-        this.camera = new THREE.PerspectiveCamera(45, 1.5, 0.1, 1000);
-        this.camera.position.set(0, 0, 8);
-        this.camera.lookAt(0, 0, 0);
-
-        // Renderer
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        this.renderer.setSize(300, 200);
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        container.appendChild(this.renderer.domElement);
-
-        // Luzes
+        // Iluminação melhorada
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        this.scene.add(ambientLight);
-
+        scene.add(ambientLight);
+        
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         directionalLight.position.set(5, 10, 7);
-        directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 1024;
-        directionalLight.shadow.mapSize.height = 1024;
-        this.scene.add(directionalLight);
+        scene.add(directionalLight);
 
-        // Chão para sombra
-        const groundGeometry = new THREE.PlaneGeometry(10, 10);
-        const groundMaterial = new THREE.ShadowMaterial({ opacity: 0.1 });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.y = -2;
-        ground.receiveShadow = true;
-        this.scene.add(ground);
+        const pointLight = new THREE.PointLight(0xffffff, 0.5);
+        pointLight.position.set(-5, 5, 5);
+        scene.add(pointLight);
 
-        // Criar celular
-        this.createPhone();
-
-        // Iniciar animação
-        this.animate();
-
-        // Ajustar redimensionamento
-        window.addEventListener('resize', () => this.onWindowResize());
-    }
-
-    createPhone() {
-        // Corpo principal do celular
-        const phoneGeometry = new THREE.BoxGeometry(1.2, 2.4, 0.12);
-        const phoneMaterial = new THREE.MeshStandardMaterial({
-            color: 0x2d3748,
-            metalness: 0.4,
-            roughness: 0.3
-        });
+        // Criar um smartphone estilizado
+        phoneGroup = new THREE.Group();
         
-        this.phone = new THREE.Mesh(phoneGeometry, phoneMaterial);
-        this.phone.castShadow = true;
-        this.phone.receiveShadow = true;
-        this.scene.add(this.phone);
-
-        // Tela
-        const screenGeometry = new THREE.PlaneGeometry(1.05, 2.1);
-        const screenMaterial = new THREE.MeshStandardMaterial({
-            color: 0x000000,
-            emissive: 0x111111,
-            metalness: 0.1,
-            roughness: 0.8
+        // Corpo do smartphone
+        const bodyGeometry = new THREE.BoxGeometry(3, 6, 0.5);
+        const bodyMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x1a1a1a,
+            shininess: 100,
+            specular: 0x222222
         });
+        const phoneBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        phoneGroup.add(phoneBody);
         
-        this.screen = new THREE.Mesh(screenGeometry, screenMaterial);
-        this.screen.position.z = 0.061;
-        this.phone.add(this.screen);
-
-        // Moldura da tela
-        const bezelGeometry = new THREE.PlaneGeometry(1.1, 2.15);
-        const bezelMaterial = new THREE.MeshBasicMaterial({
-            color: 0x4a5568,
-            side: THREE.DoubleSide
+        // Tela com material que pode mudar de cor
+        const screenGeometry = new THREE.BoxGeometry(2.8, 5.6, 0.1);
+        screenMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x000011,
+            emissive: 0x001133,
+            transparent: true,
+            opacity: 0.9,
+            shininess: 90
         });
+        const screen = new THREE.Mesh(screenGeometry, screenMaterial);
+        screen.position.z = 0.21;
+        phoneGroup.add(screen);
         
-        const bezel = new THREE.Mesh(bezelGeometry, bezelMaterial);
-        bezel.position.z = 0.06;
-        this.phone.add(bezel);
+        // Botão de home estilizado
+        const buttonGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
+        const buttonMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x333333,
+            shininess: 50
+        });
+        const button = new THREE.Mesh(buttonGeometry, buttonMaterial);
+        button.position.y = -2.8;
+        button.position.z = 0.26;
+        button.rotation.x = Math.PI / 2;
+        phoneGroup.add(button);
 
         // Câmera frontal
-        const cameraGeometry = new THREE.CircleGeometry(0.03, 8);
-        const cameraMaterial = new THREE.MeshBasicMaterial({ color: 0x1a202c });
-        const frontCamera = new THREE.Mesh(cameraGeometry, cameraMaterial);
-        frontCamera.position.set(0, 1.0, 0.062);
-        this.phone.add(frontCamera);
+        const cameraGeometry = new THREE.CircleGeometry(0.1, 8);
+        const cameraMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x000000,
+            emissive: 0x111111
+        });
+        const cameraDot = new THREE.Mesh(cameraGeometry, cameraMaterial);
+        cameraDot.position.y = 2.5;
+        cameraDot.position.z = 0.26;
+        phoneGroup.add(cameraDot);
 
-        // Alto-falante
-        const speakerGeometry = new THREE.PlaneGeometry(0.3, 0.02);
-        const speakerMaterial = new THREE.MeshBasicMaterial({ color: 0x4a5568 });
-        const speaker = new THREE.Mesh(speakerGeometry, speakerMaterial);
-        speaker.position.set(0, 1.1, 0.062);
-        this.phone.add(speaker);
+        scene.add(phoneGroup);
+        camera.position.z = 12;
+        camera.position.y = 2;
 
-        // Botão
-        const buttonGeometry = new THREE.CircleGeometry(0.05, 12);
-        const buttonMaterial = new THREE.MeshBasicMaterial({ color: 0x4a5568 });
-        const button = new THREE.Mesh(buttonGeometry, buttonMaterial);
-        button.position.set(0, -1.0, 0.062);
-        this.phone.add(button);
-    }
+        // Eixos de referência (opcional - pode ser removido)
+        // const axesHelper = new THREE.AxesHelper(5);
+        // scene.add(axesHelper);
 
-    updateOrientation(alpha, beta, gamma) {
-        // Salvar valores brutos
-        this.alpha = alpha || 0;
-        this.beta = beta || 0;
-        this.gamma = gamma || 0;
+        // Grade de referência no chão
+        const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+        gridHelper.position.y = -5;
+        scene.add(gridHelper);
 
-        // Suavizar valores para movimento mais natural
-        const smoothing = 0.3;
-        this.smoothAlpha = this.lerp(this.smoothAlpha, this.alpha, smoothing);
-        this.smoothBeta = this.lerp(this.smoothBeta, this.beta, smoothing);
-        this.smoothGamma = this.lerp(this.smoothGamma, this.gamma, smoothing);
-
-        // Converter graus para radianos
-        const a = THREE.MathUtils.degToRad(this.smoothAlpha);
-        const b = THREE.MathUtils.degToRad(this.smoothBeta);
-        const g = THREE.MathUtils.degToRad(this.smoothGamma);
-
-        // Aplicar rotação usando ordem Z-X-Y (mais natural para dispositivos móveis)
-        if (this.phone) {
-            this.phone.rotation.set(b, g, a, 'ZYX');
-        }
-
-        // Atualizar indicador de orientação
-        this.updateOrientationIndicator();
-    }
-
-    lerp(start, end, factor) {
-        return start * (1 - factor) + end * factor;
-    }
-
-    updateOrientationIndicator() {
-        const indicator = document.getElementById('orientationIndicator');
-        if (indicator) {
-            indicator.textContent = 
-                `X:${Math.round(this.gamma)}° Y:${Math.round(this.beta)}° Z:${Math.round(this.alpha)}°`;
-        }
-    }
-
-    setCalibrationMode(isCalibrating, step = 0) {
-        this.isCalibrating = isCalibrating;
-        this.calibrationStep = step;
-        
-        if (this.screen) {
-            if (isCalibrating) {
-                // Diferentes cores para diferentes passos de calibração
-                const colors = {
-                    0: 0x6366f1, // Azul - passo inicial
-                    1: 0xf59e0b, // Laranja - giro esquerda
-                    2: 0x10b981, // Verde - giro direita
-                    3: 0x8b5cf6  // Roxo - volta inicial
-                };
-                
-                this.screen.material.emissive.setHex(colors[step] || 0x6366f1);
-                this.screen.material.emissiveIntensity = 0.3;
-            } else {
-                // Modo normal - tela preta
-                this.screen.material.emissive.setHex(0x111111);
-                this.screen.material.emissiveIntensity = 0.1;
+        // Animação suave
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Rotação suave adicional para demonstração
+            if (!window.threeJSVisualizer || !window.threeJSVisualizer.hasRecentUpdate) {
+                phoneGroup.rotation.y += 0.002;
             }
+            window.threeJSVisualizer.hasRecentUpdate = false;
+            
+            renderer.render(scene, camera);
         }
-    }
+        animate();
 
-    animate() {
-        requestAnimationFrame(() => this.animate());
-        
-        // Pequena animação de flutuação quando não está calibrando
-        if (!this.isCalibrating && this.phone) {
-            const time = Date.now() * 0.001;
-            this.phone.position.y = Math.sin(time * 0.5) * 0.1;
+        // Redimensionamento responsivo
+        function onWindowResize() {
+            if (!container) return;
+            
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
         }
 
-        this.renderer.render(this.scene, this.camera);
-    }
+        window.addEventListener('resize', onWindowResize);
 
-    onWindowResize() {
-        if (this.camera && this.renderer) {
-            const container = document.getElementById('threejs-container');
-            if (container) {
-                const width = container.clientWidth;
-                const height = container.clientHeight;
+        // API pública para controle
+        window.threeJSVisualizer = {
+            updateOrientation: function(alpha, beta, gamma) {
+                if (!phoneGroup) return;
                 
-                this.camera.aspect = width / height;
-                this.camera.updateProjectionMatrix();
-                this.renderer.setSize(width, height);
-            }
-        }
-    }
+                // Converter para radianos e aplicar rotações suavizadas
+                const targetX = (beta * Math.PI) / 180;
+                const targetY = (gamma * Math.PI) / 180; 
+                const targetZ = (alpha * Math.PI) / 180;
+                
+                // Suavização das rotações
+                phoneGroup.rotation.x += (targetX - phoneGroup.rotation.x) * 0.1;
+                phoneGroup.rotation.y += (targetY - phoneGroup.rotation.y) * 0.1;
+                phoneGroup.rotation.z += (targetZ - phoneGroup.rotation.z) * 0.1;
+                
+                this.hasRecentUpdate = true;
+            },
+            
+            setCalibrationMode: function(active, step) {
+                if (!screenMaterial) return;
+                
+                if (active) {
+                    // Modo calibração - tela vermelha pulsante
+                    const intensity = 0.5 + 0.5 * Math.sin(Date.now() * 0.01);
+                    screenMaterial.emissive.setHex(0xff0000);
+                    screenMaterial.color.setHex(0x330000);
+                    screenMaterial.emissiveIntensity = intensity;
+                } else {
+                    // Modo normal - tela azul
+                    screenMaterial.emissive.setHex(0x001133);
+                    screenMaterial.color.setHex(0x000011);
+                    screenMaterial.emissiveIntensity = 1;
+                }
+            },
+            
+            onWindowResize: onWindowResize,
+            
+            // Método para destruir/limpar
+            dispose: function() {
+                if (renderer) {
+                    renderer.dispose();
+                }
+                if (container) {
+                    container.innerHTML = '';
+                }
+                window.removeEventListener('resize', onWindowResize);
+            },
+            
+            hasRecentUpdate: false
+        };
 
-    // Método para limpar recursos
-    dispose() {
-        if (this.renderer) {
-            this.renderer.dispose();
+        // Remover estado de loading e adicionar sucesso
+        const visualizer = document.getElementById('deviceVisualizer');
+        if (visualizer) {
+            visualizer.classList.remove('loading', 'error');
+            visualizer.classList.add('status-connected');
+        }
+
+        console.log('✅ Three.js inicializado com sucesso!');
+        
+    } catch (error) {
+        console.error('❌ Erro na inicialização do Three.js:', error);
+        const visualizer = document.getElementById('deviceVisualizer');
+        if (visualizer) {
+            visualizer.classList.remove('loading');
+            visualizer.classList.add('error');
         }
     }
 }
 
-// Instância global do visualizador
-let threeJSVisualizer = null;
+// Inicialização segura
+function safeInitializeThreeJS() {
+    if (typeof THREE === 'undefined') {
+        console.error('❌ Three.js não foi carregado!');
+        const visualizer = document.getElementById('deviceVisualizer');
+        if (visualizer) {
+            visualizer.classList.remove('loading');
+            visualizer.classList.add('error');
+        }
+        return;
+    }
+    
+    // Pequeno delay para garantir que o DOM esteja completamente renderizado
+    setTimeout(initializeThreeJS, 100);
+}
 
-// Inicializar quando o DOM estiver carregado
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(() => {
-        threeJSVisualizer = new ThreeJSVisualizer();
-    }, 1000);
-});
+// Inicializar quando o script for carregado
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', safeInitializeThreeJS);
+} else {
+    safeInitializeThreeJS();
+}
+
+// Exportar para uso global
+window.initializeThreeJS = initializeThreeJS;
+window.safeInitializeThreeJS = safeInitializeThreeJS;

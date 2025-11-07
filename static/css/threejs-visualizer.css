@@ -1,5 +1,3 @@
-/* static/css/threejs-visualizer.css */
-
 /* ===== VISUALIZADOR 3D SAMSUNG NOTE ULTRA-REALISTA ===== */
 
 .device-visualizer-3d {
@@ -15,6 +13,10 @@
         0 8px 32px rgba(0, 0, 0, 0.3),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
     transition: all 0.3s ease;
+    /* GARANTIR VISIBILIDADE */
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 /* Container principal do Three.js */
@@ -24,15 +26,20 @@
     position: relative;
     border-radius: 16px;
     overflow: hidden;
+    /* GARANTIR VISIBILIDADE */
+    min-height: 200px !important;
 }
 
 /* Canvas do Three.js */
 #threejs-container canvas {
     width: 100% !important;
     height: 100% !important;
-    display: block;
+    display: block !important;
     border-radius: 16px;
     transition: filter 0.3s ease;
+    /* GARANTIR VISIBILIDADE */
+    opacity: 1 !important;
+    visibility: visible !important;
 }
 
 /* Indicador de orientação premium */
@@ -199,17 +206,25 @@
     outline-offset: 2px;
 }
 
-/* Loading state */
-.device-visualizer-3d.loading #threejs-container::before {
+/* ===== ESTADOS DE CARREGAMENTO E ERRO ===== */
+
+/* Loading state - CORRIGIDO */
+.device-visualizer-3d.loading {
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-light) 100%);
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.device-visualizer-3d.loading::before {
     content: '🔄 Carregando Visualizador 3D...';
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    color: var(--text-secondary);
-    font-size: 0.8rem;
-    font-weight: 500;
-    z-index: 2;
+    z-index: 10;
 }
 
 .device-visualizer-3d.loading #threejs-container canvas {
@@ -217,24 +232,27 @@
     filter: blur(1px);
 }
 
-/* Estados de erro */
+/* Estados de erro - CORRIGIDO */
 .device-visualizer-3d.error {
     background: linear-gradient(135deg, 
         rgba(239, 68, 68, 0.05) 0%, 
         rgba(239, 68, 68, 0.02) 100%);
     border-color: rgba(239, 68, 68, 0.3);
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
 }
 
-.device-visualizer-3d.error #threejs-container::before {
+.device-visualizer-3d.error::before {
     content: '❌ Erro ao carregar visualizador 3D';
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
     color: var(--error);
-    font-size: 0.8rem;
-    font-weight: 500;
     text-align: center;
+    font-size: 0.8rem;
+    padding: 1rem;
     z-index: 2;
 }
 

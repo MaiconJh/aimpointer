@@ -1,4 +1,81 @@
 ﻿// static/js/app.js
+// SISTEMA PRINCIPAL DO AIMPOINTER - VERSÃO COMPLETA COM VISUALIZADOR 3D CORRIGIDO
+
+// ===== INICIALIZAÇÃO DO VISUALIZADOR 3D =====
+function initialize3DVisualizer() {
+    console.log('🎯 Inicializando visualizador 3D...');
+    
+    const visualizerContainer = document.getElementById('deviceVisualizer');
+    const threejsContainer = document.getElementById('threejs-container');
+    
+    if (!visualizerContainer || !threejsContainer) {
+        console.error('❌ Containers do visualizador 3D não encontrados!');
+        return;
+    }
+    
+    // Adicionar classe de loading
+    visualizerContainer.classList.add('loading');
+    
+    // Verificar se Three.js está disponível
+    if (typeof THREE === 'undefined') {
+        console.error('❌ Three.js não foi carregado!');
+        visualizerContainer.classList.remove('loading');
+        visualizerContainer.classList.add('error');
+        return;
+    }
+    
+    // Pequeno delay para garantir que o DOM esteja pronto
+    setTimeout(() => {
+        try {
+            // Inicializar o visualizador Three.js
+            if (typeof safeInitializeThreeJS === 'function') {
+                safeInitializeThreeJS();
+            } else if (window.threeJSVisualizer) {
+                // Já está inicializado
+                visualizerContainer.classList.remove('loading');
+                console.log('✅ Visualizador 3D já inicializado');
+            } else {
+                console.error('❌ Função safeInitializeThreeJS não encontrada!');
+                visualizerContainer.classList.remove('loading');
+                visualizerContainer.classList.add('error');
+            }
+        } catch (error) {
+            console.error('❌ Erro ao inicializar visualizador 3D:', error);
+            visualizerContainer.classList.remove('loading');
+            visualizerContainer.classList.add('error');
+        }
+    }, 500);
+}
+
+// ===== DIAGNÓSTICO DO VISUALIZADOR 3D =====
+function diagnose3DProblem() {
+    console.log('=== 🔍 DIAGNÓSTICO DO VISUALIZADOR 3D ===');
+    
+    // Verificar elementos DOM
+    const elements = {
+        'deviceVisualizer': document.getElementById('deviceVisualizer'),
+        'threejs-container': document.getElementById('threejs-container'),
+        'orientationIndicator': document.getElementById('orientationIndicator')
+    };
+    
+    for (const [name, element] of Object.entries(elements)) {
+        if (element) {
+            console.log(`✅ ${name}: encontrado`, element);
+            console.log(`   - Display: ${window.getComputedStyle(element).display}`);
+            console.log(`   - Visibility: ${window.getComputedStyle(element).visibility}`);
+            console.log(`   - Opacity: ${window.getComputedStyle(element).opacity}`);
+            console.log(`   - Width: ${element.offsetWidth}px, Height: ${element.offsetHeight}px`);
+        } else {
+            console.error(`❌ ${name}: NÃO encontrado`);
+        }
+    }
+    
+    // Verificar Three.js e dependências
+    console.log('Three.js disponível:', typeof THREE !== 'undefined');
+    console.log('Visualizador global:', window.threeJSVisualizer);
+    console.log('Função initializeThreeJS:', typeof initializeThreeJS);
+    console.log('Função safeInitializeThreeJS:', typeof safeInitializeThreeJS);
+}
 
 // ===== SISTEMA DE CALIBRAÇÃO BASEADO NA POSIÇÃO INICIAL =====
 class PositionBasedCalibrationSystem {
@@ -50,6 +127,11 @@ class PositionBasedCalibrationSystem {
         this.initialPosition = null;
         this.calibrationSamples = [];
         this.updateUI();
+        
+        // Ativar modo de calibração no visualizador
+        if (window.threeJSVisualizer) {
+            window.threeJSVisualizer.setCalibrationMode(true, 0);
+        }
     }
 
     confirmCurrentStep() {
@@ -89,7 +171,7 @@ class PositionBasedCalibrationSystem {
                 this.updateUI();
                 
                 // Feedback visual
-                alert('Posição inicial definida! O sistema foi recalibrado instantaneamente.');
+                showNotification('✅ Posição inicial definida! O sistema foi recalibrado.');
             }
             return;
         }
@@ -176,6 +258,11 @@ class PositionBasedCalibrationSystem {
         // Aplica calibração final
         pointerSystem.calibration = this.finalCalibration;
         
+        // Desativa modo de calibração no visualizador
+        if (window.threeJSVisualizer) {
+            window.threeJSVisualizer.setCalibrationMode(false);
+        }
+        
         // Envia calibração para servidor
         if (window.socket && window.socket.readyState === WebSocket.OPEN) {
             window.socket.send(JSON.stringify({
@@ -185,7 +272,7 @@ class PositionBasedCalibrationSystem {
         }
         
         this.updateUI();
-        alert('Calibração concluída com sucesso!');
+        showNotification('🎉 Calibração concluída com sucesso!');
     }
 
     getCurrentStep() {
@@ -274,9 +361,11 @@ class PositionBasedCalibrationSystem {
                     `${this.initialPosition.beta.toFixed(1)}°, ` +
                     `${this.initialPosition.alpha.toFixed(1)}°`;
                 initialPositionInfo.style.borderColor = 'var(--success)';
+                initialPositionInfo.style.background = 'rgba(16, 185, 129, 0.1)';
             } else {
                 initialPositionInfo.innerHTML = '⚠️ A posição inicial será usada como referência para toda a calibração';
                 initialPositionInfo.style.borderColor = 'var(--border)';
+                initialPositionInfo.style.background = 'var(--surface)';
             }
         }
     }
@@ -520,9 +609,6 @@ let sensorsActive = false;
 let lastSendTime = 0;
 const SEND_INTERVAL = 16;
 
-// Tornar o visualizador globalmente acessível
-window.threeJSVisualizer = null;
-
 // Elementos da UI
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
@@ -532,6 +618,7 @@ const sensorBtn = document.getElementById('sensorBtn');
 const configPanel = document.getElementById('configPanel');
 const overlay = document.getElementById('overlay');
 
+// ===== FUNÇÕES DE CONTROLE DA UI =====
 function updateUI() {
     if (socket && socket.readyState === WebSocket.OPEN) {
         statusDot.className = sensorsActive ? 'status-dot sensors-active' : 'status-dot connected';
@@ -550,8 +637,11 @@ function updateUI() {
     sensorBtn.classList.toggle('active', sensorsActive);
     
     // Atualiza dispositivo atual
-    document.getElementById('thisDeviceDot').style.background = 
-        (socket && socket.readyState === WebSocket.OPEN) ? 'var(--success)' : 'var(--error)';
+    const thisDeviceDot = document.getElementById('thisDeviceDot');
+    if (thisDeviceDot) {
+        thisDeviceDot.style.background = 
+            (socket && socket.readyState === WebSocket.OPEN) ? 'var(--success)' : 'var(--error)';
+    }
 }
 
 function toggleConfig() {
@@ -584,7 +674,7 @@ function connectWebSocket() {
     window.socket = socket;
     
     socket.onopen = () => {
-        console.log('WebSocket conectado com sucesso');
+        console.log('✅ WebSocket conectado com sucesso');
         updateUI();
     };
     
@@ -599,8 +689,10 @@ function connectWebSocket() {
             
             if (data.screen_width && data.screen_height) {
                 pointerSystem.setScreenResolution(data.screen_width, data.screen_height);
-                document.getElementById('resolutionInfo').textContent = 
-                    `${data.screen_width}x${data.screen_height}`;
+                const resolutionInfo = document.getElementById('resolutionInfo');
+                if (resolutionInfo) {
+                    resolutionInfo.textContent = `${data.screen_width}x${data.screen_height}`;
+                }
             }
             
             updateUI();
@@ -610,146 +702,128 @@ function connectWebSocket() {
         }
     };
     
-    socket.onclose = (event) => {
-        console.log('WebSocket desconectado:', event.code, event.reason);
+    socket.onclose = () => {
+        console.log('WebSocket desconectado');
         sensorsActive = false;
         updateUI();
     };
     
     socket.onerror = (error) => {
         console.error('Erro WebSocket:', error);
-        alert('Erro ao conectar. Verifique o IP e se o servidor está rodando.');
+        alert('Erro ao conectar com o servidor. Verifique o IP e se o servidor está rodando.');
     };
 }
 
-// ===== CONTROLES DO SISTEMA =====
-function toggleSensorFusion() {
-    pointerSystem.sensorFusion = document.getElementById('sensorFusionToggle').checked;
-    pointerSystem.saveSettings();
-}
-
-function updateSensitivity() {
-    const sensitivity = parseInt(document.getElementById('sensitivity').value);
-    document.getElementById('sensitivityValue').textContent = sensitivity;
-    pointerSystem.setSensitivity(sensitivity);
-}
-
-function updateSmoothingFactor() {
-    const factor = parseInt(document.getElementById('smoothingFactor').value);
-    document.getElementById('smoothingValue').textContent = factor;
-    pointerSystem.setSmoothingFactor(factor);
-}
-
-function updateCompensation() {
-    const compensation = parseInt(document.getElementById('compensation').value);
-    document.getElementById('compensationValue').textContent = compensation;
-    pointerSystem.setCompensation(compensation);
-}
-
-function startAdvancedCalibration() {
-    pointerSystem.startAdvancedCalibration();
-}
-
-function confirmStep(stepNumber) {
-    pointerSystem.confirmStep(stepNumber);
-}
-
-function resetCalibration() {
-    pointerSystem.calibration = { x: 0, y: 0, z: 0 };
-    pointerSystem.resetFilter();
-    pointerSystem.calibrationSystem = new PositionBasedCalibrationSystem();
-    
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: 'reset_calibration'
-        }));
-    }
-}
-
 function toggleSensors() {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-        return alert('Conecte o WebSocket primeiro!');
-    }
-
-    if (sensorsActive) {
-        sensorsActive = false;
-        updateUI();
+    if (!sensorsActive) {
+        startSensors();
     } else {
-        enableSensors();
-    }
-}
-
-function enableSensors() {
-    if ('DeviceOrientationEvent' in window) {
-        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-            DeviceOrientationEvent.requestPermission()
-                .then(response => {
-                    if (response === 'granted') startSensors();
-                    else alert('Permissão negada para os sensores');
-                })
-                .catch(error => alert('Erro: ' + error));
-        } else {
-            startSensors();
-        }
-    } else {
-        alert('Navegador não suporta sensores de movimento');
+        stopSensors();
     }
 }
 
 function startSensors() {
-    sensorsActive = true;
-    updateUI();
-
-    let frameCount = 0;
-    let lastFpsUpdate = performance.now();
+    if (typeof DeviceOrientationEvent === 'undefined') {
+        alert('Seu navegador não suporta a API de orientação do dispositivo.');
+        return;
+    }
     
-    window.addEventListener('deviceorientation', (event) => {
-        if (!sensorsActive || !socket) return;
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        // iOS 13+ precisa de permissão
+        DeviceOrientationEvent.requestPermission()
+            .then(permissionState => {
+                if (permissionState === 'granted') {
+                    setupOrientationListener();
+                    sensorsActive = true;
+                    updateUI();
+                } else {
+                    alert('Permissão para sensores de movimento negada.');
+                }
+            })
+            .catch(console.error);
+    } else {
+        // Navegadores que não precisam de permissão
+        setupOrientationListener();
+        sensorsActive = true;
+        updateUI();
+    }
+}
 
-        const now = performance.now();
-        if (now - lastSendTime < SEND_INTERVAL) return;
-        
-        const gamma = event.gamma || 0;
-        const beta = event.beta || 0;
-        const alpha = event.alpha || 0;
+function stopSensors() {
+    window.removeEventListener('deviceorientation', handleOrientation);
+    sensorsActive = false;
+    updateUI();
+}
 
-        // Calcula posição
-        const position = pointerSystem.calculateAbsolutePosition(gamma, beta, alpha);
-        
-        // Atualiza visualização
-        const container = document.querySelector('.pointer-container');
-        const containerWidth = container.offsetWidth;
-        const containerHeight = container.offsetHeight;
-        
-        const crossX = (position.x / pointerSystem.screenWidth) * containerWidth;
-        const crossY = (position.y / pointerSystem.screenHeight) * containerHeight;
-        
-        crosshair.style.transform = `translate(${crossX}px, ${crossY}px)`;
-        
-        // Atualiza displays
-        document.getElementById('directionX').textContent = gamma.toFixed(1) + '°';
-        document.getElementById('directionY').textContent = beta.toFixed(1) + '°';
-        document.getElementById('directionZ').textContent = alpha.toFixed(1) + '°';
-        document.getElementById('accuracy').textContent = 
-            pointerSystem.calculateAccuracy(gamma, beta).toFixed(0) + '%';
-        
-        // Atualiza FPS
-        const fps = pointerSystem.updateFPS();
-        if (fps !== null) {
-            document.getElementById('fpsCounter').textContent = fps;
-            frameCount = 0;
-            lastFpsUpdate = now;
+function setupOrientationListener() {
+    window.addEventListener('deviceorientation', handleOrientation);
+}
+
+function handleOrientation(event) {
+    const gamma = event.gamma;  // Inclinação esquerda-direita (-90 a 90)
+    const beta = event.beta;    // Inclinação frente-trás (-180 a 180)
+    const alpha = event.alpha;  // Orientação (0 a 360)
+    
+    // Atualizar dados dos sensores na UI
+    updateSensorData(gamma, beta, alpha);
+    
+    // Calcular posição do cursor
+    const position = pointerSystem.calculateAbsolutePosition(gamma, beta, alpha);
+    
+    // Atualizar crosshair visual
+    updateCrosshair(position.x, position.y);
+    
+    // Enviar para servidor (com throttling)
+    const now = Date.now();
+    if (now - lastSendTime >= SEND_INTERVAL) {
+        sendPositionToServer(position.x, position.y);
+        lastSendTime = now;
+    }
+    
+    // Atualizar FPS
+    const fps = pointerSystem.updateFPS();
+    if (fps !== null) {
+        const fpsCounter = document.getElementById('fpsCounter');
+        if (fpsCounter) {
+            fpsCounter.textContent = fps;
         }
-        
-        // Envia posição
+    }
+}
+
+function updateSensorData(gamma, beta, alpha) {
+    const directionX = document.getElementById('directionX');
+    const directionY = document.getElementById('directionY');
+    const directionZ = document.getElementById('directionZ');
+    const accuracy = document.getElementById('accuracy');
+    
+    if (directionX) directionX.textContent = Math.round(gamma) + '°';
+    if (directionY) directionY.textContent = Math.round(beta) + '°';
+    if (directionZ) directionZ.textContent = Math.round(alpha) + '°';
+    if (accuracy) accuracy.textContent = pointerSystem.calculateAccuracy(gamma, beta) + '%';
+}
+
+function updateCrosshair(x, y) {
+    if (!crosshair) return;
+    
+    const pointerContainer = document.querySelector('.pointer-container');
+    if (!pointerContainer) return;
+    
+    const containerRect = pointerContainer.getBoundingClientRect();
+    const relativeX = (x / pointerSystem.screenWidth) * containerRect.width;
+    const relativeY = (y / pointerSystem.screenHeight) * containerRect.height;
+    
+    crosshair.style.left = relativeX + 'px';
+    crosshair.style.top = relativeY + 'px';
+}
+
+function sendPositionToServer(x, y) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({
             type: 'absolute_position',
-            x: position.x,
-            y: position.y
+            x: Math.round(x),
+            y: Math.round(y)
         }));
-        
-        lastSendTime = now;
-    });
+    }
 }
 
 function leftClick() {
@@ -770,45 +844,160 @@ function rightClick() {
     }
 }
 
-// Configura eventos dos sliders
-function setupSliderEvents() {
+function startAdvancedCalibration() {
+    pointerSystem.startAdvancedCalibration();
+}
+
+function confirmStep(stepNumber) {
+    pointerSystem.confirmStep(stepNumber);
+}
+
+function resetCalibration() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: 'reset_calibration'
+        }));
+    }
+    
+    pointerSystem.calibration = { x: 0, y: 0, z: 0 };
+    pointerSystem.calibrationSystem.initialPosition = null;
+    pointerSystem.calibrationSystem.isCalibrating = false;
+    pointerSystem.calibrationSystem.currentStep = 0;
+    pointerSystem.calibrationSystem.calibrationSteps.forEach(step => step.completed = false);
+    pointerSystem.calibrationSystem.updateUI();
+    
+    // Resetar visualizador
+    if (window.threeJSVisualizer) {
+        window.threeJSVisualizer.setCalibrationMode(false);
+    }
+    
+    showNotification('🔃 Calibração resetada!');
+}
+
+// ===== CONFIGURAÇÕES DE CONTROLE =====
+function setupEventListeners() {
+    // Sensibilidade
     const sensitivitySlider = document.getElementById('sensitivity');
-    const smoothingSlider = document.getElementById('smoothingFactor');
-    const compensationSlider = document.getElementById('compensation');
-    const sensorFusionToggle = document.getElementById('sensorFusionToggle');
-    
     if (sensitivitySlider) {
-        sensitivitySlider.addEventListener('input', updateSensitivity);
+        sensitivitySlider.addEventListener('input', function() {
+            const value = parseInt(this.value);
+            const sensitivityValue = document.getElementById('sensitivityValue');
+            if (sensitivityValue) sensitivityValue.textContent = value;
+            pointerSystem.setSensitivity(value);
+        });
     }
     
+    // Suavização
+    const smoothingSlider = document.getElementById('smoothingFactor');
     if (smoothingSlider) {
-        smoothingSlider.addEventListener('input', updateSmoothingFactor);
+        smoothingSlider.addEventListener('input', function() {
+            const value = parseInt(this.value);
+            const smoothingValue = document.getElementById('smoothingValue');
+            if (smoothingValue) smoothingValue.textContent = value;
+            pointerSystem.setSmoothingFactor(value);
+        });
     }
     
+    // Compensação
+    const compensationSlider = document.getElementById('compensation');
     if (compensationSlider) {
-        compensationSlider.addEventListener('input', updateCompensation);
+        compensationSlider.addEventListener('input', function() {
+            const value = parseInt(this.value);
+            const compensationValue = document.getElementById('compensationValue');
+            if (compensationValue) compensationValue.textContent = value;
+            pointerSystem.setCompensation(value);
+        });
     }
     
+    // Fusão de sensores
+    const sensorFusionToggle = document.getElementById('sensorFusionToggle');
     if (sensorFusionToggle) {
-        sensorFusionToggle.addEventListener('change', toggleSensorFusion);
+        sensorFusionToggle.addEventListener('change', function() {
+            pointerSystem.sensorFusion = this.checked;
+            pointerSystem.saveSettings();
+        });
     }
 }
 
-// Inicialização
-updateUI();
-setupSliderEvents();
-
-// Ajusta escala
-function adjustScale() {
-    const width = window.innerWidth;
-    if (width < 768) {
-        document.documentElement.style.fontSize = '14px';
-    } else {
-        document.documentElement.style.fontSize = '16px';
-    }
+// ===== FUNÇÕES AUXILIARES =====
+function showNotification(message) {
+    // Implementação simples de notificação - pode ser melhorada com um sistema de toasts
+    console.log('💬 ' + message);
+    
+    // Criar um elemento de notificação temporário
+    const notification = document.createElement('div');
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--primary);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        z-index: 10000;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Remover após 3 segundos
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 3000);
 }
 
-window.addEventListener('resize', adjustScale);
-adjustScale();
+// ===== INICIALIZAÇÃO PRINCIPAL =====
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🎯 DOM carregado, inicializando AimPointer...');
+    
+    // Configurar event listeners
+    setupEventListeners();
+    
+    // Pequeno delay para garantir que tudo esteja carregado
+    setTimeout(() => {
+        initialize3DVisualizer();
+        
+        // Re-inicializar quando abrir o painel de configurações
+        const configButton = document.querySelector('.config-header-btn');
+        if (configButton) {
+            configButton.addEventListener('click', function() {
+                console.log('⚙️ Painel de configurações aberto - reinicializando visualizador 3D');
+                setTimeout(initialize3DVisualizer, 300);
+                
+                // Executar diagnóstico se segurar Shift
+                setTimeout(() => {
+                    if (window.event && window.event.shiftKey) {
+                        diagnose3DProblem();
+                    }
+                }, 500);
+            });
+        }
+        
+        // Também inicializar quando a janela for redimensionada
+        window.addEventListener('resize', function() {
+            if (window.threeJSVisualizer && typeof window.threeJSVisualizer.onWindowResize === 'function') {
+                window.threeJSVisualizer.onWindowResize();
+            }
+        });
+        
+    }, 1000);
+});
 
-document.getElementById('serverIp').focus();
+// Tornar funções globais para acesso via HTML
+window.toggleConfig = toggleConfig;
+window.toggleWebSocket = toggleWebSocket;
+window.toggleSensors = toggleSensors;
+window.leftClick = leftClick;
+window.rightClick = rightClick;
+window.startAdvancedCalibration = startAdvancedCalibration;
+window.confirmStep = confirmStep;
+window.resetCalibration = resetCalibration;
+window.diagnose3DProblem = diagnose3DProblem;
+
+console.log('✅ AimPointer carregado com sucesso!');
