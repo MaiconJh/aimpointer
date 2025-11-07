@@ -1,4 +1,4 @@
-﻿// static/js/app.js
+﻿﻿// static/js/app.js
 // AIMPOINTER - Arquivo completo com calibração reescrita, fusão com acelerômetro e visualizador 3D
 // Substitua o arquivo existente por este conteúdo.
 
@@ -17,6 +17,30 @@ function angleDiff(a, b) {
     return diff;
 }
 function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ===== toggleConfig robusto (função global usada pelo onclick inline) =====
+function toggleConfig() {
+    const panel = document.getElementById('configPanel');
+    const ov = document.getElementById('overlay');
+
+    if (!panel || !ov) {
+        console.warn('toggleConfig: elementos configPanel/overlay não encontrados', { panel, ov });
+        return;
+    }
+
+    panel.classList.toggle('open');
+    ov.classList.toggle('active');
+
+    console.log(`toggleConfig: painel agora ${panel.classList.contains('open') ? 'aberto' : 'fechado'}`);
+
+    if (panel.classList.contains('open')) {
+        const closeBtn = panel.querySelector('.close-config');
+        if (closeBtn) closeBtn.focus();
+    } else {
+        const cfgBtn = document.querySelector('.config-header-btn');
+        if (cfgBtn) cfgBtn.focus();
+    }
+}
 
 // ===== VISUALIZADOR 3D - invocado da threejs-visualizer.js =====
 function initialize3DVisualizer() {
@@ -403,7 +427,7 @@ const ACCEL_STABLE_TOL = 1.6; // m/s^2
 const ACCEL_TRUST_STABLE = 0.7;
 const ACCEL_TRUST_MOVING = 0.2;
 
-// Elementos da UI (serão buscados no DOMContentLoaded para serem seguros)
+// Elementos da UI (serão buscados no DOMContentLoaded)
 let statusDot, statusText, crosshair, connectBtn, sensorBtn, configPanel, overlay, accelerometerIndicator;
 
 // ===== FUNÇÕES AUXILIARES E UI =====
@@ -454,12 +478,6 @@ function updateUI() {
         thisDeviceDot.style.background =
             (socket && socket.readyState === WebSocket.OPEN) ? 'var(--success)' : 'var(--error)';
     }
-}
-
-function toggleConfig() {
-    if (!configPanel || !overlay) return;
-    configPanel.classList.toggle('open');
-    overlay.classList.toggle('active');
 }
 
 // ===== WebSocket =====
@@ -527,23 +545,19 @@ function connectWebSocket() {
 function setupOrientationListener() {
     window.addEventListener('deviceorientation', handleOrientation, { passive: true });
 }
-
 function teardownOrientationListener() {
     window.removeEventListener('deviceorientation', handleOrientation);
 }
 
 function setupMotionListener() {
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-        // iOS
         DeviceMotionEvent.requestPermission().catch(() => {}).then(res => {
-            // ignorar resultado - alguns browsers não retornam
             window.addEventListener('devicemotion', handleMotion, { passive: true });
         });
     } else {
         window.addEventListener('devicemotion', handleMotion, { passive: true });
     }
 }
-
 function teardownMotionListener() {
     window.removeEventListener('devicemotion', handleMotion);
 }
@@ -776,10 +790,9 @@ document.addEventListener('DOMContentLoaded', function() {
     overlay = document.getElementById('overlay');
     accelerometerIndicator = document.getElementById('accelerometerIndicator');
 
-    // Eventos de botões que o HTML chama via onclick apontam para funções globais;
-    // garantir que existam handlers também via JS quando aplicável
-    if (connectBtn) connectBtn.addEventListener('click', toggleWebSocket);
-    if (sensorBtn) sensorBtn.addEventListener('click', toggleSensors);
+    // Event handlers
+    if (connectBtn) connectBtn.addEventListener('click', function(e){ e.preventDefault(); toggleWebSocket(); });
+    if (sensorBtn) sensorBtn.addEventListener('click', function(e){ e.preventDefault(); toggleSensors(); });
     if (overlay) overlay.addEventListener('click', toggleConfig);
 
     setupEventListeners();
