@@ -19,6 +19,7 @@ function angleDiff(a, b) {
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 // ===== toggleConfig robusto (função global usada pelo onclick inline) =====
+// Substitua/cole isto no lugar da função toggleConfig atual (app.js)
 function toggleConfig() {
     const panel = document.getElementById('configPanel');
     const ov = document.getElementById('overlay');
@@ -28,12 +29,15 @@ function toggleConfig() {
         return;
     }
 
+    // Forçar reflow antes da troca de classe (ajuda em alguns navegadores)
+    panel.getBoundingClientRect();
+
     panel.classList.toggle('open');
     ov.classList.toggle('active');
 
     console.log(`toggleConfig: painel agora ${panel.classList.contains('open') ? 'aberto' : 'fechado'}`);
 
-    // Acessibilidade: mover foco para o painel ao abrir, ou para o botão ao fechar
+    // Acessibilidade: foco
     if (panel.classList.contains('open')) {
         const closeBtn = panel.querySelector('.close-config');
         if (closeBtn) closeBtn.focus();
@@ -845,48 +849,32 @@ function setupEventListeners() {
 
 // ===== Inicialização principal =====
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🎯 DOM carregado, inicializando AimPointer...');
-
-    // Capturar elementos da UI
-    statusDot = document.getElementById('statusDot');
-    statusText = document.getElementById('statusText');
-    crosshair = document.getElementById('crosshair');
-    connectBtn = document.getElementById('connectBtn');
-    sensorBtn = document.getElementById('sensorBtn');
-    configPanel = document.getElementById('configPanel');
-    overlay = document.getElementById('overlay');
-    accelerometerIndicator = document.getElementById('accelerometerIndicator');
-
-    // Event handlers (garantir chamadas robustas)
-    if (connectBtn) connectBtn.addEventListener('click', function(e){ e.preventDefault(); toggleWebSocket(); });
-    if (sensorBtn) sensorBtn.addEventListener('click', function(e){ e.preventDefault(); toggleSensors(); });
-    if (overlay) overlay.addEventListener('click', toggleConfig);
-
-    // Botão config header: garantir listener por JS (não depender só do onclick inline)
+    // garantir listeners nos botões header (não depender apenas de onclick inline)
     const cfgButtons = document.querySelectorAll('.config-header-btn');
     cfgButtons.forEach(btn => {
+        // remove listener duplicado e adiciona um novo, seguro
         btn.removeEventListener('click', toggleConfig);
         btn.addEventListener('click', function (e) {
             e.preventDefault();
             toggleConfig();
-            setTimeout(initialize3DVisualizer, 300);
+            // re-inicializar visualizador com pequena espera (opcional)
+            setTimeout(() => { if (typeof initialize3DVisualizer === 'function') initialize3DVisualizer(); }, 250);
         });
     });
 
-    setupEventListeners();
+    // overlay
+    const overlayElem = document.getElementById('overlay');
+    if (overlayElem) {
+        overlayElem.removeEventListener('click', toggleConfig);
+        overlayElem.addEventListener('click', toggleConfig);
+    }
 
-    // Inicializar visualizador 3D
-    setTimeout(() => {
-        initialize3DVisualizer();
-        window.addEventListener('resize', function() {
-            if (window.threeJSVisualizer && typeof window.threeJSVisualizer.onWindowResize === 'function') {
-                window.threeJSVisualizer.onWindowResize();
-            }
-        });
-    }, 500);
-
-    updateUI();
-    console.log('✅ AimPointer carregado com sucesso!');
+    // close button (X)
+    const closeBtn = document.querySelector('.close-config');
+    if (closeBtn) {
+        closeBtn.removeEventListener('click', toggleConfig);
+        closeBtn.addEventListener('click', toggleConfig);
+    }
 });
 
 // Tornar funções globais para acesso via HTML
