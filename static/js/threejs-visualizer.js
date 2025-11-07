@@ -1,6 +1,5 @@
 // static/js/threejs-visualizer.js
-// VISUALIZADOR 3D PARA O AIMPOINTER - SEM ROTAÇÃO AUTOMÁTICA (ANIMAÇÃO REMOVIDA)
-// Versão limpa: só código do visualizador Three.js, sem classes de calibração/controle.
+// VISUALIZADOR 3D PARA O AIMPOINTER - SEM ROTAÇÃO AUTOMÁTICA (VERSÃO LIMPA)
 
 // Fallback mínimo para evitar erros se outros scripts acessarem antes da inicialização
 if (typeof window !== 'undefined' && !window.threeJSVisualizer) {
@@ -113,7 +112,7 @@ function initializeThreeJS() {
         // Render loop (sem rotação automática)
         function animate() {
             requestAnimationFrame(animate);
-            // phoneGroup só é rotacionado por updateOrientation() quando houver dados
+            // phoneGroup rotacionado somente via updateOrientation()
             renderer.render(scene, camera);
         }
         animate();
@@ -127,7 +126,7 @@ function initializeThreeJS() {
         }
         window.addEventListener('resize', onWindowResize);
 
-        // API pública (disponível após inicialização)
+        // API pública
         window.threeJSVisualizer = {
             updateOrientation: function(alpha, beta, gamma) {
                 if (!phoneGroup) return;
