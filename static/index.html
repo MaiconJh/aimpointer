@@ -24,7 +24,8 @@
                     <span id="statusText">Desconectado</span>
                 </div>
             </div>
-            <button class="config-header-btn" onclick="toggleConfig()">
+            <!-- Removido onclick inline e adicionado id (listeners feitos via JS) -->
+            <button class="config-header-btn" id="configBtn" aria-label="Abrir configurações">
                 ⚙️ Configurações
             </button>
         </div>
@@ -67,7 +68,8 @@
     <div class="config-panel" id="configPanel">
         <div class="config-header">
             <div class="config-title">Configurações</div>
-            <button class="close-config" onclick="toggleConfig()">×</button>
+            <!-- Removido onclick inline aqui também -->
+            <button class="close-config" aria-label="Fechar configurações">×</button>
         </div>
         
         <div class="config-content">
@@ -92,7 +94,7 @@
                     <label class="input-label">IP do Servidor</label>
                     <input type="text" class="input-field" id="serverIp" value="192.168.1.104">
                 </div>
-                <button class="action-btn" onclick="toggleWebSocket()" id="connectBtn">
+                <button class="action-btn" id="connectBtn">
                     Conectar WebSocket
                 </button>
             </div>
@@ -100,7 +102,7 @@
             <!-- Sensores -->
             <div class="config-section">
                 <div class="section-title">Sensores</div>
-                <button class="action-btn" onclick="toggleSensors()" id="sensorBtn">
+                <button class="action-btn" id="sensorBtn">
                     Ativar Sensores
                 </button>
 
